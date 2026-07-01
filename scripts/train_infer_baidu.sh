@@ -39,6 +39,12 @@ RENDER_DIR_VGGT="${RENDER_DIR_VGGT:-}"
 RENDER_DIR_BA="${RENDER_DIR_BA:-}"
 VIEWER_COMMAND_TEMPLATE="${VIEWER_COMMAND_TEMPLATE:-}"
 
+AUTO_CLASH="${AUTO_CLASH:-1}"
+TORCH_HOME="${TORCH_HOME:-${REPO_ROOT}/.cache/torch}"
+HF_HOME="${HF_HOME:-${REPO_ROOT}/.cache/huggingface}"
+VGGT_WEIGHTS_PATH="${VGGT_WEIGHTS_PATH:-${TORCH_HOME}/hub/checkpoints/model.pt}"
+VGGT_WEIGHTS_URL="${VGGT_WEIGHTS_URL:-https://huggingface.co/facebook/VGGT-1B/resolve/main/model.pt}"
+
 RUN_PREPARE="${RUN_PREPARE:-1}"
 RUN_VGGT="${RUN_VGGT:-1}"
 RUN_BA="${RUN_BA:-1}"
@@ -158,6 +164,7 @@ done
 export PATH="${ENV_PREFIX}/bin:${PATH}"
 export CONDA_PREFIX="${ENV_PREFIX}"
 export LD_LIBRARY_PATH="${ENV_PREFIX}/lib:${LD_LIBRARY_PATH:-}"
+export TORCH_HOME HF_HOME VGGT_WEIGHTS_PATH VGGT_WEIGHTS_URL
 unset PYTHONHOME PYTHONPATH
 
 cd "${REPO_ROOT}"
@@ -169,6 +176,21 @@ exec > >(tee -a "${STDOUT_LOG}") 2>&1
 
 log() {
     echo "[$(date '+%F %T')] $*"
+}
+
+enable_clash_if_available() {
+    if [[ "${AUTO_CLASH}" != "1" ]]; then
+        log "AUTO_CLASH disabled"
+        return
+    fi
+    if [[ -f /root/clashctl/scripts/cmd/clashctl.sh ]]; then
+        log "enabling clash proxy"
+        # shellcheck disable=SC1091
+        source /root/clashctl/scripts/cmd/clashctl.sh
+        clashon || log "clashon failed; continuing without proxy"
+    else
+        log "clashctl not found; continuing without proxy"
+    fi
 }
 
 require_path() {
@@ -184,10 +206,17 @@ run_step() {
     CUDA_VISIBLE_DEVICES="${CVD}" "$@"
 }
 
+mkdir -p "${TORCH_HOME}/hub/checkpoints" "${HF_HOME}"
+enable_clash_if_available
+
 log "repo: ${REPO_ROOT}"
 log "scene dir: ${SCENE_DIR}"
 log "video: ${VIDEO_PATH}"
 log "env python: ${PYTHON_BIN}"
+log "torch home: ${TORCH_HOME}"
+log "hf home: ${HF_HOME}"
+log "vggt weights: ${VGGT_WEIGHTS_PATH}"
+log "vggt weights url: ${VGGT_WEIGHTS_URL}"
 log "CVD: ${CVD}"
 log "device: ${DEVICE}"
 log "stdout log: ${STDOUT_LOG}"

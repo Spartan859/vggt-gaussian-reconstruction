@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import random
 import shutil
+import urllib.error
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -41,8 +42,26 @@ def run_vggt_package(config: VggtConfig) -> Path:
 
     dtype = torch.bfloat16 if torch.cuda.get_device_capability(device)[0] >= 8 else torch.float16
     model = VGGT()
-    weights_url = "https://huggingface.co/facebook/VGGT-1B/resolve/main/model.pt"
-    model.load_state_dict(torch.hub.load_state_dict_from_url(weights_url))
+    weights_url = os.environ.get("VGGT_WEIGHTS_URL", "https://huggingface.co/facebook/VGGT-1B/resolve/main/model.pt")
+    weights_path = Path(os.environ.get("VGGT_WEIGHTS_PATH", ""))
+    if weights_path.exists():
+        print(f"Loading VGGT weights from {weights_path}")
+        state_dict = torch.load(weights_path, map_location="cpu")
+    else:
+        print(f"Downloading VGGT weights to torch cache from {weights_url}")
+        try:
+            state_dict = torch.hub.load_state_dict_from_url(
+                weights_url,
+                model_dir=str(weights_path.parent) if str(weights_path) else None,
+                file_name=weights_path.name if str(weights_path) else None,
+                map_location="cpu",
+            )
+        except (OSError, urllib.error.URLError) as exc:
+            raise RuntimeError(
+                "Failed to download VGGT weights. Enable network/proxy on the GPU job, "
+                f"set VGGT_WEIGHTS_URL to an accessible mirror, or place model.pt at {weights_path}."
+            ) from exc
+    model.load_state_dict(state_dict)
     model.eval().to(device)
 
     fixed_resolution = 518
