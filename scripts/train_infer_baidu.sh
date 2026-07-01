@@ -45,6 +45,10 @@ VGGT_WEIGHTS_PATH="${VGGT_WEIGHTS_PATH:-${TORCH_HOME}/hub/checkpoints/model.pt}"
 VGGT_WEIGHTS_URL="${VGGT_WEIGHTS_URL:-https://hf-mirror.com/facebook/VGGT-1B/resolve/main/model.pt}"
 VGGSFM_TRACKER_WEIGHTS_PATH="${VGGSFM_TRACKER_WEIGHTS_PATH:-${TORCH_HOME}/hub/checkpoints/vggsfm_v2_tracker.pt}"
 VGGSFM_TRACKER_WEIGHTS_URL="${VGGSFM_TRACKER_WEIGHTS_URL:-https://hf-mirror.com/facebook/VGGSfM/resolve/main/vggsfm_v2_tracker.pt}"
+ALIKED_WEIGHTS_PATH="${ALIKED_WEIGHTS_PATH:-${TORCH_HOME}/hub/checkpoints/aliked-n16.pth}"
+ALIKED_WEIGHTS_URL="${ALIKED_WEIGHTS_URL:-https://gh-proxy.org/https://github.com/Shiaoming/ALIKED/raw/main/models/aliked-n16.pth}"
+SUPERPOINT_WEIGHTS_PATH="${SUPERPOINT_WEIGHTS_PATH:-${TORCH_HOME}/hub/checkpoints/superpoint_v1.pth}"
+SUPERPOINT_WEIGHTS_URL="${SUPERPOINT_WEIGHTS_URL:-https://gh-proxy.org/https://github.com/cvg/LightGlue/releases/download/v0.1_arxiv/superpoint_v1.pth}"
 
 RUN_PREPARE="${RUN_PREPARE:-1}"
 RUN_VGGT="${RUN_VGGT:-1}"
@@ -167,6 +171,7 @@ export PATH="${ENV_PREFIX}/bin:${PATH}"
 export CONDA_PREFIX="${ENV_PREFIX}"
 export LD_LIBRARY_PATH="${ENV_PREFIX}/lib:${LD_LIBRARY_PATH:-}"
 export TORCH_HOME HF_HOME VGGT_WEIGHTS_PATH VGGT_WEIGHTS_URL VGGSFM_TRACKER_WEIGHTS_PATH VGGSFM_TRACKER_WEIGHTS_URL
+export ALIKED_WEIGHTS_PATH ALIKED_WEIGHTS_URL SUPERPOINT_WEIGHTS_PATH SUPERPOINT_WEIGHTS_URL
 unset PYTHONHOME PYTHONPATH
 
 cd "${REPO_ROOT}"
@@ -234,6 +239,8 @@ log "vggt weights: ${VGGT_WEIGHTS_PATH}"
 log "vggt weights url: ${VGGT_WEIGHTS_URL}"
 log "vggsfm tracker weights: ${VGGSFM_TRACKER_WEIGHTS_PATH}"
 log "vggsfm tracker weights url: ${VGGSFM_TRACKER_WEIGHTS_URL}"
+log "aliked weights: ${ALIKED_WEIGHTS_PATH}"
+log "superpoint weights: ${SUPERPOINT_WEIGHTS_PATH}"
 log "CVD: ${CVD}"
 log "device: ${DEVICE}"
 log "stdout log: ${STDOUT_LOG}"

@@ -30,6 +30,10 @@ VGGT_WEIGHTS_PATH="${VGGT_WEIGHTS_PATH:-${TORCH_HOME}/hub/checkpoints/model.pt}"
 VGGT_WEIGHTS_URL="${VGGT_WEIGHTS_URL:-https://hf-mirror.com/facebook/VGGT-1B/resolve/main/model.pt}"
 VGGSFM_TRACKER_WEIGHTS_PATH="${VGGSFM_TRACKER_WEIGHTS_PATH:-${TORCH_HOME}/hub/checkpoints/vggsfm_v2_tracker.pt}"
 VGGSFM_TRACKER_WEIGHTS_URL="${VGGSFM_TRACKER_WEIGHTS_URL:-https://hf-mirror.com/facebook/VGGSfM/resolve/main/vggsfm_v2_tracker.pt}"
+ALIKED_WEIGHTS_PATH="${ALIKED_WEIGHTS_PATH:-${TORCH_HOME}/hub/checkpoints/aliked-n16.pth}"
+ALIKED_WEIGHTS_URL="${ALIKED_WEIGHTS_URL:-https://gh-proxy.org/https://github.com/Shiaoming/ALIKED/raw/main/models/aliked-n16.pth}"
+SUPERPOINT_WEIGHTS_PATH="${SUPERPOINT_WEIGHTS_PATH:-${TORCH_HOME}/hub/checkpoints/superpoint_v1.pth}"
+SUPERPOINT_WEIGHTS_URL="${SUPERPOINT_WEIGHTS_URL:-https://gh-proxy.org/https://github.com/cvg/LightGlue/releases/download/v0.1_arxiv/superpoint_v1.pth}"
 WEIGHTS_DOWNLOAD_WORKERS="${WEIGHTS_DOWNLOAD_WORKERS:-8}"
 REQUIRE_CUDA="${REQUIRE_CUDA:-0}"
 
@@ -201,6 +205,11 @@ download_vggsfm_tracker_weights() {
     download_weight_file "VGGSfM tracker weights" "${VGGSFM_TRACKER_WEIGHTS_URL}" "${VGGSFM_TRACKER_WEIGHTS_PATH}"
 }
 
+download_lightglue_weights() {
+    download_weight_file "ALIKED weights" "${ALIKED_WEIGHTS_URL}" "${ALIKED_WEIGHTS_PATH}"
+    download_weight_file "SuperPoint weights" "${SUPERPOINT_WEIGHTS_URL}" "${SUPERPOINT_WEIGHTS_PATH}"
+}
+
 download_weight_file() {
     local label="$1"
     local url="$2"
@@ -354,6 +363,10 @@ log "vggt weights: ${VGGT_WEIGHTS_PATH}"
 log "vggt weights url: ${VGGT_WEIGHTS_URL}"
 log "vggsfm tracker weights: ${VGGSFM_TRACKER_WEIGHTS_PATH}"
 log "vggsfm tracker weights url: ${VGGSFM_TRACKER_WEIGHTS_URL}"
+log "aliked weights: ${ALIKED_WEIGHTS_PATH}"
+log "aliked weights url: ${ALIKED_WEIGHTS_URL}"
+log "superpoint weights: ${SUPERPOINT_WEIGHTS_PATH}"
+log "superpoint weights url: ${SUPERPOINT_WEIGHTS_URL}"
 log "weights download workers: ${WEIGHTS_DOWNLOAD_WORKERS}"
 log "cuda arch: ${TORCH_CUDA_ARCH_LIST}"
 log "stages: create-env=${RUN_CREATE_ENV} cuda=${RUN_CUDA} torch=${RUN_TORCH} deps=${RUN_DEPS} gsplat=${RUN_GSPLAT} weights=${RUN_WEIGHTS} clean-gsplat=${CLEAN_GSPLAT} verify=${RUN_VERIFY}"
@@ -384,6 +397,7 @@ export CUDACXX="${CUDA_HOME}/bin/nvcc"
 export LD_LIBRARY_PATH="${ENV_PREFIX}/lib:${LD_LIBRARY_PATH:-}"
 export TORCH_EXTENSIONS_DIR
 export TORCH_HOME HF_HOME VGGT_WEIGHTS_PATH VGGT_WEIGHTS_URL VGGSFM_TRACKER_WEIGHTS_PATH VGGSFM_TRACKER_WEIGHTS_URL
+export ALIKED_WEIGHTS_PATH ALIKED_WEIGHTS_URL SUPERPOINT_WEIGHTS_PATH SUPERPOINT_WEIGHTS_URL
 
 if [[ "${RUN_CUDA}" == "1" ]]; then
     log "installing CUDA ${CUDA_VERSION} toolkit and ninja"
@@ -490,8 +504,9 @@ fi
 if [[ "${RUN_WEIGHTS}" == "1" ]]; then
     download_vggt_weights
     download_vggsfm_tracker_weights
+    download_lightglue_weights
 else
-    log "skipping VGGT/VGGSfM weights download"
+    log "skipping VGGT/VGGSfM/LightGlue weights download"
 fi
 
 if [[ "${RUN_VERIFY}" == "1" ]]; then
@@ -516,7 +531,7 @@ for name in mods:
     print("OK", name)
 print("torch", torch.__version__, "cuda build", torch.version.cuda)
 print("cuda available", torch.cuda.is_available(), "gpu count", torch.cuda.device_count())
-for env_name in ("VGGT_WEIGHTS_PATH", "VGGSFM_TRACKER_WEIGHTS_PATH"):
+for env_name in ("VGGT_WEIGHTS_PATH", "VGGSFM_TRACKER_WEIGHTS_PATH", "ALIKED_WEIGHTS_PATH", "SUPERPOINT_WEIGHTS_PATH"):
     path = Path(os.environ[env_name])
     print(env_name, path, path.exists(), path.stat().st_size if path.exists() else 0)
     if not path.exists() or path.stat().st_size == 0:
