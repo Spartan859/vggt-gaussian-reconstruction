@@ -24,11 +24,11 @@ Baidu A800 environment, `scripts/setup_a800_env.sh` installs PyTorch
 ## End-to-end commands
 
 ```bash
-python prepare_data.py --video "大作业数据/数据3-场景.mp4" --out outputs/scene --num_frames 48
+python prepare_data.py --video "大作业数据/数据3-场景.mp4" --out outputs/scene --num_frames 96
 python run_vggt.py --scene outputs/scene --device cuda
 python ba_optimize.py --scene outputs/scene --iters 1000 --lr_pose 1e-3 --lr_points 1e-2
-python train_gaussians.py --scene outputs/scene --mode vggt --steps 7000
-python train_gaussians.py --scene outputs/scene --mode ba --steps 7000
+python train_gaussians.py --scene outputs/scene --mode vggt --steps 30000
+python train_gaussians.py --scene outputs/scene --mode ba --steps 30000
 python evaluate.py --scene outputs/scene
 python viewer.py --scene outputs/scene --mode ba
 ```
@@ -39,7 +39,7 @@ Run frame extraction twice and compare:
 
 ```bash
 python prepare_data.py --video "大作业数据/数据3-场景.mp4" --out outputs/scene_uniform --strategy uniform --num_frames 48
-python prepare_data.py --video "大作业数据/数据3-场景.mp4" --out outputs/scene_selected --strategy quality --num_frames 48
+python prepare_data.py --video "大作业数据/数据3-场景.mp4" --out outputs/scene_selected --strategy quality --num_frames 96
 ```
 
 Use the same VGGT, BA, Gaussian, and evaluation commands for both directories.

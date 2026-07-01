@@ -37,7 +37,7 @@
 ## 7. VGGT 改进实验
 - 改进方法：质量感知帧选择，优先保留清晰、曝光正常且时间分布均衡的帧。
 - 对照组：均匀采样 48 帧。
-- 实验组：从更多候选帧中按清晰度/曝光分数选择 48 帧。
+- 实验组：从更多候选帧中按清晰度/曝光分数选择 96 帧，并训练 30000 steps。
 - 报告：VGGT+BA 重投影误差、3DGS 渲染质量、总运行时间。
 
 ## 8. 实验结果页模板
@@ -45,7 +45,7 @@
 | --- | ---: | ---: | ---: | ---: | ---: |
 | Uniform + VGGT + 3DGS | 48 | TBD | TBD | TBD | TBD |
 | Uniform + VGGT + BA + 3DGS | 48 | TBD | TBD | TBD | TBD |
-| Quality + VGGT + BA + 3DGS | 48 | TBD | TBD | TBD | TBD |
+| Quality + VGGT + BA + 3DGS | 96 | TBD | TBD | TBD | TBD |
 
 ## 9. 答辩演示顺序
 1. 展示输入视频抽帧结果。

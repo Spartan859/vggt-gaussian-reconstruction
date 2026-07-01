@@ -15,6 +15,7 @@ def main() -> None:
     parser.add_argument("--scene", required=True, type=Path)
     parser.add_argument("--render-dir-vggt", type=Path, default=None)
     parser.add_argument("--render-dir-ba", type=Path, default=None)
+    parser.add_argument("--output", type=Path, default=None)
     args = parser.parse_args()
 
     report = {}
@@ -37,7 +38,7 @@ def main() -> None:
     if args.render_dir_ba:
         report.setdefault("ba", {})["render_metrics"] = image_metrics(args.render_dir_ba, args.scene / "images")
 
-    out = args.scene / "eval_report.json"
+    out = args.output if args.output is not None else args.scene / "eval_report.json"
     write_json(report, out)
     print(f"Wrote {out}")
 

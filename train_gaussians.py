@@ -12,18 +12,19 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Train 3D Gaussians from VGGT or BA COLMAP output.")
     parser.add_argument("--scene", required=True, type=Path)
     parser.add_argument("--mode", choices=["vggt", "ba"], default="ba")
-    parser.add_argument("--steps", type=int, default=7000)
+    parser.add_argument("--steps", type=int, default=30000)
     parser.add_argument("--device", default="cuda")
-    parser.add_argument("--lr", type=float, default=1e-2)
+    parser.add_argument("--lr", type=float, default=1.0, help="Global multiplier for gsplat-style parameter learning rates.")
     parser.add_argument("--image-scale", type=float, default=1.0)
     parser.add_argument("--max-points", type=int, default=200_000)
     parser.add_argument("--save-every", type=int, default=1000)
     parser.add_argument("--render-every", type=int, default=1000)
+    parser.add_argument("--output-dir", type=Path, default=None)
     args = parser.parse_args()
 
     sparse = args.scene / args.mode / "sparse" / "0"
     images = args.scene / "images"
-    output = args.scene / f"gaussians_{args.mode}"
+    output = args.output_dir if args.output_dir is not None else args.scene / f"gaussians_{args.mode}"
     if not has_model(sparse):
         raise SystemExit(f"Missing sparse model: {sparse}")
     if not images.exists():

@@ -10,7 +10,7 @@ PYTHON_BIN="${PYTHON_BIN:-${ENV_PREFIX}/bin/python}"
 
 VIDEO_PATH="${VIDEO_PATH:-${REPO_ROOT}/大作业数据/数据3-场景.mp4}"
 SCENE_DIR="${SCENE_DIR:-${REPO_ROOT}/outputs/scene}"
-NUM_FRAMES="${NUM_FRAMES:-48}"
+NUM_FRAMES="${NUM_FRAMES:-96}"
 FRAME_STRATEGY="${FRAME_STRATEGY:-quality}"
 CANDIDATE_MULTIPLIER="${CANDIDATE_MULTIPLIER:-4}"
 
@@ -28,8 +28,8 @@ BA_HUBER_DELTA="${BA_HUBER_DELTA:-4.0}"
 BA_MIN_TRACK_LEN="${BA_MIN_TRACK_LEN:-2}"
 
 GAUSSIAN_MODE="${GAUSSIAN_MODE:-ba}"
-GAUSSIAN_STEPS="${GAUSSIAN_STEPS:-7000}"
-GAUSSIAN_LR="${GAUSSIAN_LR:-1e-2}"
+GAUSSIAN_STEPS="${GAUSSIAN_STEPS:-30000}"
+GAUSSIAN_LR="${GAUSSIAN_LR:-1.0}"
 GAUSSIAN_IMAGE_SCALE="${GAUSSIAN_IMAGE_SCALE:-1.0}"
 GAUSSIAN_MAX_POINTS="${GAUSSIAN_MAX_POINTS:-200000}"
 GAUSSIAN_SAVE_EVERY="${GAUSSIAN_SAVE_EVERY:-1000}"
@@ -59,6 +59,9 @@ RUN_VIEWER="${RUN_VIEWER:-0}"
 
 STDOUT_LOG_DIR="${STDOUT_LOG_DIR:-${REPO_ROOT}/outputs/platform_logs}"
 EXP_NAME="${EXP_NAME:-vggt_gaussian_full_$(date +%Y%m%d_%H%M%S)}"
+RUN_OUTPUT_DIR="${RUN_OUTPUT_DIR:-${SCENE_DIR}/runs/${EXP_NAME}}"
+GAUSSIAN_OUTPUT_DIR="${GAUSSIAN_OUTPUT_DIR:-${RUN_OUTPUT_DIR}/gaussians_${GAUSSIAN_MODE}}"
+EVAL_REPORT_PATH="${EVAL_REPORT_PATH:-${RUN_OUTPUT_DIR}/eval_report.json}"
 
 usage() {
     cat <<'EOF'
@@ -75,6 +78,11 @@ Options:
   --run-viewer          Run viewer command after evaluation
   --skip-viewer         Do not run viewer command
   -h, --help            Show this help
+
+Output:
+  Each run writes Gaussian outputs and eval_report.json under:
+    ${SCENE_DIR}/runs/${EXP_NAME}/
+  Override RUN_OUTPUT_DIR, GAUSSIAN_OUTPUT_DIR, or EVAL_REPORT_PATH if needed.
 
 Examples:
   bash scripts/train_infer_baidu.sh --resume-from gsplat
@@ -175,7 +183,7 @@ export ALIKED_WEIGHTS_PATH ALIKED_WEIGHTS_URL SUPERPOINT_WEIGHTS_PATH SUPERPOINT
 unset PYTHONHOME PYTHONPATH
 
 cd "${REPO_ROOT}"
-mkdir -p "${STDOUT_LOG_DIR}"
+mkdir -p "${STDOUT_LOG_DIR}" "${RUN_OUTPUT_DIR}"
 STDOUT_LOG="${STDOUT_LOG_DIR}/${EXP_NAME}.log"
 export STDOUT_LOG
 touch "${STDOUT_LOG}"
@@ -244,6 +252,9 @@ log "superpoint weights: ${SUPERPOINT_WEIGHTS_PATH}"
 log "CVD: ${CVD}"
 log "device: ${DEVICE}"
 log "stdout log: ${STDOUT_LOG}"
+log "run output dir: ${RUN_OUTPUT_DIR}"
+log "gaussian output dir: ${GAUSSIAN_OUTPUT_DIR}"
+log "eval report path: ${EVAL_REPORT_PATH}"
 log "stages: prepare=${RUN_PREPARE} vggt=${RUN_VGGT} ba=${RUN_BA} gsplat=${RUN_GSPLAT} eval=${RUN_EVAL} viewer=${RUN_VIEWER}"
 
 require_path "${PYTHON_BIN}"
@@ -346,6 +357,7 @@ if [[ "${RUN_GSPLAT}" == "1" ]]; then
         --max-points "${GAUSSIAN_MAX_POINTS}"
         --save-every "${GAUSSIAN_SAVE_EVERY}"
         --render-every "${GAUSSIAN_RENDER_EVERY}"
+        --output-dir "${GAUSSIAN_OUTPUT_DIR}"
     )
     run_step "${GSPLAT_CMD[@]}"
 else
@@ -354,7 +366,7 @@ fi
 
 if [[ "${RUN_EVAL}" == "1" ]]; then
     log "starting evaluation summary"
-    EVAL_CMD=("${PYTHON_BIN}" evaluate.py --scene "${SCENE_DIR}")
+    EVAL_CMD=("${PYTHON_BIN}" evaluate.py --scene "${SCENE_DIR}" --output "${EVAL_REPORT_PATH}")
     if [[ -n "${RENDER_DIR_VGGT}" ]]; then
         require_path "${RENDER_DIR_VGGT}"
         EVAL_CMD+=(--render-dir-vggt "${RENDER_DIR_VGGT}")
@@ -362,6 +374,11 @@ if [[ "${RUN_EVAL}" == "1" ]]; then
     if [[ -n "${RENDER_DIR_BA}" ]]; then
         require_path "${RENDER_DIR_BA}"
         EVAL_CMD+=(--render-dir-ba "${RENDER_DIR_BA}")
+    elif [[ "${GAUSSIAN_MODE}" == "ba" && -d "${GAUSSIAN_OUTPUT_DIR}/renders" ]]; then
+        EVAL_CMD+=(--render-dir-ba "${GAUSSIAN_OUTPUT_DIR}/renders")
+    fi
+    if [[ -z "${RENDER_DIR_VGGT}" && "${GAUSSIAN_MODE}" == "vggt" && -d "${GAUSSIAN_OUTPUT_DIR}/renders" ]]; then
+        EVAL_CMD+=(--render-dir-vggt "${GAUSSIAN_OUTPUT_DIR}/renders")
     fi
     run_step "${EVAL_CMD[@]}"
 else
@@ -382,3 +399,4 @@ fi
 
 log "pipeline finished"
 log "outputs: ${SCENE_DIR}"
+log "run outputs: ${RUN_OUTPUT_DIR}"
