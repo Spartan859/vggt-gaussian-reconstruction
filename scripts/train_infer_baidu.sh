@@ -61,7 +61,7 @@ Usage: bash scripts/train_infer_baidu.sh [options]
 Options:
   --resume-from STAGE   Skip stages before STAGE. Stages: prepare, vggt, ba, gsplat, eval, viewer
   --skip-prepare        Do not extract frames; requires SCENE_DIR/images
-  --skip-vggt           Do not run VGGT/COLMAP; requires SCENE_DIR/vggt/sparse/0
+  --skip-vggt           Do not run VGGT/COLMAP; requires SCENE_DIR/vggt/sparse/0 with bin or txt COLMAP files
   --skip-ba             Do not run bundle adjustment
   --skip-gsplat         Do not run Gaussian training
   --skip-eval           Do not run evaluation
@@ -268,11 +268,11 @@ if [[ "${RUN_VGGT}" == "1" ]]; then
 else
     log "skipping VGGT/COLMAP initialization"
     if [[ ! -e "${SCENE_DIR}/vggt/sparse/0/cameras.txt" && ! -e "${SCENE_DIR}/vggt/sparse/0/cameras.bin" ]]; then
-        echo "Missing sparse model: ${SCENE_DIR}/vggt/sparse/0" >&2
+        echo "Missing COLMAP cameras file in: ${SCENE_DIR}/vggt/sparse/0" >&2
         exit 1
     fi
     if [[ ! -e "${SCENE_DIR}/vggt/sparse/0/images.txt" && ! -e "${SCENE_DIR}/vggt/sparse/0/images.bin" ]]; then
-        echo "Missing sparse model: ${SCENE_DIR}/vggt/sparse/0" >&2
+        echo "Missing COLMAP images file in: ${SCENE_DIR}/vggt/sparse/0" >&2
         exit 1
     fi
 fi

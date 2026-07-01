@@ -11,6 +11,9 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
+from vggt.dependency.np_to_pycolmap import batch_np_matrix_to_pycolmap
+from vggt.dependency.projection import project_3D_points_np
+
 
 @dataclass
 class VggtConfig:
@@ -33,10 +36,8 @@ def run_vggt_package(config: VggtConfig) -> Path:
     if not image_paths:
         raise ValueError(f"No images found in {image_dir}")
 
-    from vggt.dependency.np_to_pycolmap import batch_np_matrix_to_pycolmap_wo_track
     from vggt.models.vggt import VGGT
     from vggt.utils.geometry import unproject_depth_map_to_point_map
-    from vggt.utils.helper import create_pixel_coordinate_grid, randomly_limit_trues
     from vggt.utils.load_fn import load_and_preprocess_images_square
     from vggt.utils.pose_enc import pose_encoding_to_extri_intri
 
@@ -75,35 +76,96 @@ def run_vggt_package(config: VggtConfig) -> Path:
         aggregated_tokens, ps_idx = model.aggregator(infer_images[None])
         pose_enc = model.camera_head(aggregated_tokens)[-1]
         extrinsic, intrinsic = pose_encoding_to_extri_intri(pose_enc, infer_images.shape[-2:])
-        depth_map, depth_conf = model.depth_head(aggregated_tokens, infer_images[None], ps_idx)
+    depth_map, depth_conf = model.depth_head(aggregated_tokens, infer_images[None], ps_idx)
+    if model.point_head is not None:
+        world_points, world_points_conf = model.point_head(aggregated_tokens, infer_images[None], ps_idx)
+    else:
+        world_points = unproject_depth_map_to_point_map(
+            depth_map.squeeze(0).cpu().numpy(), extrinsic.squeeze(0).cpu().numpy(), intrinsic.squeeze(0).cpu().numpy()
+        )[None]
+        world_points_conf = depth_conf
 
     extrinsic_np = extrinsic.squeeze(0).cpu().numpy()
     intrinsic_np = intrinsic.squeeze(0).cpu().numpy()
-    depth_np = depth_map.squeeze(0).cpu().numpy()
-    conf_np = depth_conf.squeeze(0).cpu().numpy()
-    points_3d = unproject_depth_map_to_point_map(depth_np, extrinsic_np, intrinsic_np)
+    world_points_np = world_points.squeeze(0).cpu().numpy()
+    world_points_conf_np = world_points_conf.squeeze(0).cpu().numpy()
+    points_rgb_np = (infer_images.squeeze(0).cpu().numpy() * 255).astype(np.uint8)
 
-    num_frames, height, width, _ = points_3d.shape
-    points_rgb = F.interpolate(images, size=(fixed_resolution, fixed_resolution), mode="bilinear", align_corners=False)
-    points_rgb_np = (points_rgb.cpu().numpy() * 255).astype(np.uint8).transpose(0, 2, 3, 1)
-    points_xyf = create_pixel_coordinate_grid(num_frames, height, width)
-    conf_mask = randomly_limit_trues(conf_np >= config.conf_threshold, config.max_points)
+    points_3d, points_rgb, source_stats = _select_ba_points(
+        world_points_np,
+        world_points_conf_np,
+        points_rgb_np,
+        max_points=config.max_points,
+        conf_threshold=config.conf_threshold,
+    )
+    tracks_2d, points_cam = project_3D_points_np(points_3d, extrinsic_np, intrinsic_np)
+    track_masks = np.isfinite(tracks_2d).all(axis=-1) & (points_cam[:, 2, :] > 1e-6)
+    track_masks &= (tracks_2d[..., 0] >= 0) & (tracks_2d[..., 0] < fixed_resolution)
+    track_masks &= (tracks_2d[..., 1] >= 0) & (tracks_2d[..., 1] < fixed_resolution)
 
-    reconstruction = batch_np_matrix_to_pycolmap_wo_track(
-        points_3d[conf_mask],
-        points_xyf[conf_mask],
-        points_rgb_np[conf_mask],
+    reconstruction, inlier_mask = batch_np_matrix_to_pycolmap(
+        points_3d,
         extrinsic_np,
         intrinsic_np,
+        tracks_2d,
         np.array([fixed_resolution, fixed_resolution]),
+        masks=track_masks,
         shared_camera=False,
         camera_type="PINHOLE",
+        min_inlier_per_frame=1,
+        points_rgb=points_rgb,
     )
+    if reconstruction is None:
+        raise RuntimeError(
+            "VGGT did not produce enough multi-view observations for BA. "
+            f"Selected {source_stats['selected']} dense points, but no valid reconstruction was built."
+        )
     _rename_and_rescale(reconstruction, [p.name for p in image_paths], original_coords, fixed_resolution)
 
     sparse_zero = config.scene / "vggt" / "sparse" / "0"
     _write_pycolmap_reconstruction(reconstruction, sparse_zero)
     return sparse_zero
+
+
+def _select_ba_points(
+    world_points: np.ndarray,
+    world_points_conf: np.ndarray,
+    points_rgb: np.ndarray,
+    *,
+    max_points: int,
+    conf_threshold: float,
+) -> tuple[np.ndarray, np.ndarray, dict[str, int]]:
+    if world_points.ndim != 4:
+        raise ValueError(f"Expected world_points to have shape (S, H, W, 3); got {world_points.shape}")
+    if world_points_conf.shape != world_points.shape[:-1]:
+        raise ValueError(
+            f"Expected world_points_conf to have shape {world_points.shape[:-1]}; got {world_points_conf.shape}"
+        )
+
+    mask = np.isfinite(world_points_conf) & np.all(np.isfinite(world_points), axis=-1)
+    mask &= world_points_conf >= conf_threshold
+    if not np.any(mask):
+        fallback = np.isfinite(world_points_conf) & np.all(np.isfinite(world_points), axis=-1)
+        if not np.any(fallback):
+            raise RuntimeError("VGGT did not produce any finite world points.")
+        mask = fallback
+
+    flat_idx = np.flatnonzero(mask.reshape(-1))
+    if flat_idx.size > max_points:
+        rng = np.random.default_rng(0)
+        flat_idx = rng.choice(flat_idx, size=max_points, replace=False)
+    flat_idx.sort()
+
+    s, h, w = world_points.shape[:3]
+    frames = flat_idx // (h * w)
+    rem = flat_idx % (h * w)
+    ys = rem // w
+    xs = rem % w
+
+    points_3d = world_points[frames, ys, xs].astype(np.float64)
+    points_rgb = points_rgb[frames, ys, xs].astype(np.uint8)
+    stats = {"selected": int(points_3d.shape[0]), "frames": int(s), "height": int(h), "width": int(w)}
+    return points_3d, points_rgb, stats
 
 
 def _write_pycolmap_reconstruction(reconstruction, output_dir: Path) -> None:
