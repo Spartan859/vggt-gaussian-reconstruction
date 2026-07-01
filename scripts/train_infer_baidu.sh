@@ -2,11 +2,11 @@
 set -euo pipefail
 
 # Baidu training-platform entrypoint for the VGGT Gaussian reconstruction pipeline.
-# Defaults use the TSP3D micromamba environment. Override variables below as needed.
+# Defaults use the VGGT_GSPLAT_A800 micromamba environment. Override variables below as needed.
 
 REPO_ROOT="${REPO_ROOT:-/mnt/share/algorithm/kimi/cache/lxy/vggt-gaussian-reconstruction}"
-TSP3D_ENV="${TSP3D_ENV:-/mnt/share/micromamba/root/envs/VGGT_GSPLAT_A800}"
-PYTHON_BIN="${PYTHON_BIN:-${TSP3D_ENV}/bin/python}"
+ENV_PREFIX="${ENV_PREFIX:-/mnt/share/micromamba/root/envs/VGGT_GSPLAT_A800}"
+PYTHON_BIN="${PYTHON_BIN:-${ENV_PREFIX}/bin/python}"
 
 VIDEO_PATH="${VIDEO_PATH:-${REPO_ROOT}/大作业数据/数据3-场景.mp4}"
 SCENE_DIR="${SCENE_DIR:-${REPO_ROOT}/outputs/scene}"
@@ -155,9 +155,9 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-export PATH="${TSP3D_ENV}/bin:${PATH}"
-export CONDA_PREFIX="${TSP3D_ENV}"
-export LD_LIBRARY_PATH="${TSP3D_ENV}/lib:${LD_LIBRARY_PATH:-}"
+export PATH="${ENV_PREFIX}/bin:${PATH}"
+export CONDA_PREFIX="${ENV_PREFIX}"
+export LD_LIBRARY_PATH="${ENV_PREFIX}/lib:${LD_LIBRARY_PATH:-}"
 unset PYTHONHOME PYTHONPATH
 
 cd "${REPO_ROOT}"
