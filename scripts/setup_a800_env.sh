@@ -153,6 +153,25 @@ log() {
     echo "[$(date '+%F %T')] $*"
 }
 
+repair_ffmpeg_openh264() {
+    if command -v ffprobe >/dev/null 2>&1 && ffprobe -version >/dev/null 2>&1; then
+        return
+    fi
+    if [[ -e "${ENV_PREFIX}/lib/libopenh264.so.5" ]]; then
+        return
+    fi
+    local target=""
+    if [[ -e "${ENV_PREFIX}/lib/libopenh264.so.2.1.1" ]]; then
+        target="libopenh264.so.2.1.1"
+    elif [[ -e "${ENV_PREFIX}/lib/libopenh264.so" ]]; then
+        target="libopenh264.so"
+    fi
+    if [[ -n "${target}" ]]; then
+        log "repairing ffmpeg openh264 soname: libopenh264.so.5 -> ${target}"
+        ln -s "${target}" "${ENV_PREFIX}/lib/libopenh264.so.5"
+    fi
+}
+
 log "repo: ${REPO_ROOT}"
 log "env: ${ENV_PREFIX}"
 log "cuda toolkit: ${CUDA_VERSION}"
@@ -239,8 +258,11 @@ EOF
         -r "${FILTERED_REQ_DIR}/vggt_demo_deps.txt"
     TMPDIR="${TMPDIR}" PIP_CACHE_DIR="${PIP_CACHE_DIR}" "${PYTHON_BIN}" -m pip install \
         "git+https://gh-proxy.org/https://github.com/jytime/LightGlue.git#egg=lightglue"
+
+    repair_ffmpeg_openh264
 else
     log "skipping project/VGGT/example dependency install"
+    repair_ffmpeg_openh264
 fi
 
 if [[ "${RUN_GSPLAT}" == "1" ]]; then
