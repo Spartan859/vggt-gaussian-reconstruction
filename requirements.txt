@@ -1,0 +1,8 @@
+numpy>=1.24
+Pillow>=10
+torch>=2.1
+tqdm>=4.66
+
+# Optional, useful on the CUDA training machine:
+# scikit-image>=0.22
+# gsplat

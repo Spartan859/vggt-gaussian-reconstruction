@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vggt-gaussian-reconstruction"
+version = "0.1.0"
+description = "VGGT, bundle adjustment, and 3D Gaussian splatting pipeline for a reconstruction assignment."
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=1.24",
+  "Pillow>=10",
+  "torch>=2.1",
+  "tqdm>=4.66",
+]
+
+[project.optional-dependencies]
+metrics = ["scikit-image>=0.22"]
+dev = ["pytest>=8"]
+cuda = [
+  "gsplat",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

@@ -1,0 +1,12 @@
+大作业数据/
+大作业.pptx
+.DS_Store
+outputs/
+__pycache__/
+.pytest_cache/
+*.egg-info/
+.tmp/
+.pip_cache/
+external/
+*.pyc
+req*.png
