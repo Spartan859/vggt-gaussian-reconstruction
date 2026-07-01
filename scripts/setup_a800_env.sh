@@ -24,6 +24,11 @@ GSPLAT_INSTALL_MODE="${GSPLAT_INSTALL_MODE:-wheel}"
 GSPLAT_WHEEL_VERSION="${GSPLAT_WHEEL_VERSION:-1.5.3+pt23cu118}"
 GSPLAT_WHEEL_INDEX="${GSPLAT_WHEEL_INDEX:-https://docs.gsplat.studio/whl/pt23cu118/gsplat/}"
 VGGT_PACKAGE_SPEC="${VGGT_PACKAGE_SPEC:-git+https://gh-proxy.org/https://github.com/facebookresearch/vggt.git}"
+TORCH_HOME="${TORCH_HOME:-${REPO_ROOT}/.cache/torch}"
+HF_HOME="${HF_HOME:-${REPO_ROOT}/.cache/huggingface}"
+VGGT_WEIGHTS_PATH="${VGGT_WEIGHTS_PATH:-${TORCH_HOME}/hub/checkpoints/model.pt}"
+VGGT_WEIGHTS_URL="${VGGT_WEIGHTS_URL:-https://hf-mirror.com/facebook/VGGT-1B/resolve/main/model.pt}"
+WEIGHTS_DOWNLOAD_WORKERS="${WEIGHTS_DOWNLOAD_WORKERS:-8}"
 REQUIRE_CUDA="${REQUIRE_CUDA:-0}"
 
 RUN_CREATE_ENV="${RUN_CREATE_ENV:-1}"
@@ -31,6 +36,7 @@ RUN_CUDA="${RUN_CUDA:-0}"
 RUN_TORCH="${RUN_TORCH:-1}"
 RUN_DEPS="${RUN_DEPS:-1}"
 RUN_GSPLAT="${RUN_GSPLAT:-1}"
+RUN_WEIGHTS="${RUN_WEIGHTS:-1}"
 RUN_VERIFY="${RUN_VERIFY:-1}"
 CLEAN_GSPLAT="${CLEAN_GSPLAT:-1}"
 
@@ -39,13 +45,14 @@ usage() {
 Usage: bash scripts/setup_a800_env.sh [options]
 
 Options:
-  --resume-from STAGE   Skip stages before STAGE. Stages: create-env, cuda, torch, deps, gsplat, verify
+  --resume-from STAGE   Skip stages before STAGE. Stages: create-env, cuda, torch, deps, gsplat, weights, verify
   --skip-create-env     Do not create the micromamba environment
   --with-cuda-toolkit   Install CUDA toolkit packages before Python packages
   --skip-cuda           Do not install CUDA toolkit packages
   --skip-torch          Do not reinstall PyTorch CUDA wheels
   --skip-deps           Do not reinstall project/VGGT/example dependencies
   --skip-gsplat         Do not install/rebuild gsplat
+  --skip-weights        Do not download VGGT weights
   --skip-clean-gsplat   Do not remove old gsplat build artifacts before installing/rebuilding
   --skip-verify         Do not run import/CUDA verification
   -h, --help            Show this help
@@ -80,12 +87,20 @@ resume_from() {
             RUN_TORCH=0
             RUN_DEPS=0
             ;;
+        weights)
+            RUN_CREATE_ENV=0
+            RUN_CUDA=0
+            RUN_TORCH=0
+            RUN_DEPS=0
+            RUN_GSPLAT=0
+            ;;
         verify)
             RUN_CREATE_ENV=0
             RUN_CUDA=0
             RUN_TORCH=0
             RUN_DEPS=0
             RUN_GSPLAT=0
+            RUN_WEIGHTS=0
             ;;
         *)
             echo "Unknown resume stage: $1" >&2
@@ -124,6 +139,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --skip-gsplat)
             RUN_GSPLAT=0
+            shift
+            ;;
+        --skip-weights)
+            RUN_WEIGHTS=0
             shift
             ;;
         --skip-clean-gsplat)
@@ -172,13 +191,157 @@ repair_ffmpeg_openh264() {
     fi
 }
 
+download_vggt_weights() {
+    mkdir -p "$(dirname "${VGGT_WEIGHTS_PATH}")" "${HF_HOME}"
+    if [[ -s "${VGGT_WEIGHTS_PATH}" ]]; then
+        log "VGGT weights already exist: ${VGGT_WEIGHTS_PATH}"
+        return
+    fi
+    log "downloading VGGT weights"
+    log "url: ${VGGT_WEIGHTS_URL}"
+    log "path: ${VGGT_WEIGHTS_PATH}"
+    log "workers: ${WEIGHTS_DOWNLOAD_WORKERS}"
+    local tmp_path="${VGGT_WEIGHTS_PATH}.part"
+    local downloaded=0
+    if [[ -x "${PYTHON_BIN}" && "${WEIGHTS_DOWNLOAD_WORKERS}" -gt 1 ]]; then
+        set +e
+        VGGT_WEIGHTS_URL="${VGGT_WEIGHTS_URL}" \
+        VGGT_WEIGHTS_PATH="${VGGT_WEIGHTS_PATH}" \
+        WEIGHTS_DOWNLOAD_WORKERS="${WEIGHTS_DOWNLOAD_WORKERS}" \
+        "${PYTHON_BIN}" - <<'PY'
+import concurrent.futures
+import math
+import os
+from pathlib import Path
+import shutil
+import sys
+import time
+import urllib.error
+import urllib.request
+
+url = os.environ["VGGT_WEIGHTS_URL"]
+target = Path(os.environ["VGGT_WEIGHTS_PATH"])
+workers = max(1, int(os.environ.get("WEIGHTS_DOWNLOAD_WORKERS", "8")))
+tmp_path = target.with_name(target.name + ".part")
+parts_dir = target.with_name(target.name + ".parts")
+
+request = urllib.request.Request(url, method="HEAD")
+with urllib.request.urlopen(request, timeout=60) as response:
+    total = int(response.headers.get("Content-Length", "0"))
+    ranges = response.headers.get("Accept-Ranges", "").lower()
+
+if total <= 0 or "bytes" not in ranges:
+    sys.exit(2)
+
+parts_dir.mkdir(parents=True, exist_ok=True)
+chunk_count = min(workers * 4, math.ceil(total / (64 * 1024 * 1024)))
+chunk_size = math.ceil(total / chunk_count)
+ranges_to_fetch = []
+for idx in range(chunk_count):
+    start = idx * chunk_size
+    end = min(total - 1, start + chunk_size - 1)
+    part = parts_dir / f"{idx:04d}.part"
+    expected = end - start + 1
+    if part.exists() and part.stat().st_size == expected:
+        continue
+    ranges_to_fetch.append((idx, start, end, part, expected))
+
+def fetch(item):
+    idx, start, end, part, expected = item
+    part_tmp = part.with_suffix(".part.tmp")
+    for attempt in range(1, 6):
+        try:
+            existing = part_tmp.stat().st_size if part_tmp.exists() else 0
+            if existing > expected:
+                part_tmp.unlink()
+                existing = 0
+            if existing == expected:
+                part_tmp.replace(part)
+                return expected
+            resume_start = start + existing
+            headers = {"Range": f"bytes={resume_start}-{end}"}
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=120) as response, part_tmp.open("ab") as fh:
+                shutil.copyfileobj(response, fh, length=1024 * 1024)
+            if part_tmp.stat().st_size != expected:
+                raise RuntimeError(f"chunk {idx} size mismatch: {part_tmp.stat().st_size} != {expected}")
+            part_tmp.replace(part)
+            return expected
+        except Exception:
+            if attempt == 5:
+                raise
+            time.sleep(3 * attempt)
+    return 0
+
+if ranges_to_fetch:
+    done_bytes = total - sum(item[4] for item in ranges_to_fetch)
+    print(f"parallel download: {chunk_count} chunks, {workers} workers, {done_bytes}/{total} bytes already complete", flush=True)
+    completed = 0
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = [pool.submit(fetch, item) for item in ranges_to_fetch]
+        for future in concurrent.futures.as_completed(futures):
+            completed += future.result()
+            current = done_bytes + completed
+            pct = current * 100 / total
+            print(f"downloaded {current}/{total} bytes ({pct:.1f}%)", flush=True)
+else:
+    print(f"all {chunk_count} chunks already downloaded; assembling", flush=True)
+
+with tmp_path.open("wb") as out:
+    for idx in range(chunk_count):
+        part = parts_dir / f"{idx:04d}.part"
+        if not part.exists():
+            raise FileNotFoundError(part)
+        with part.open("rb") as fh:
+            shutil.copyfileobj(fh, out, length=1024 * 1024)
+
+if tmp_path.stat().st_size != total:
+    raise RuntimeError(f"assembled size mismatch: {tmp_path.stat().st_size} != {total}")
+shutil.rmtree(parts_dir)
+PY
+        status=$?
+        set -e
+        if [[ "${status}" == "0" ]]; then
+            downloaded=1
+        elif [[ "${status}" == "2" ]]; then
+            echo "parallel range download is unavailable; falling back to curl/wget" >&2
+        else
+            exit "${status}"
+        fi
+    fi
+    if [[ "${downloaded}" != "1" ]]; then
+        if command -v curl >/dev/null 2>&1; then
+            curl -L --fail --retry 5 --retry-delay 5 --connect-timeout 30 \
+                --continue-at - \
+                --output "${tmp_path}" \
+                "${VGGT_WEIGHTS_URL}"
+        elif command -v wget >/dev/null 2>&1; then
+            wget --tries=5 --timeout=30 --continue \
+                --output-document="${tmp_path}" \
+                "${VGGT_WEIGHTS_URL}"
+        else
+            echo "Neither curl nor wget is available for downloading VGGT weights." >&2
+            exit 1
+        fi
+    fi
+    if [[ ! -s "${tmp_path}" ]]; then
+        echo "Downloaded VGGT weights file is empty: ${tmp_path}" >&2
+        exit 1
+    fi
+    mv "${tmp_path}" "${VGGT_WEIGHTS_PATH}"
+    log "downloaded VGGT weights: $(du -h "${VGGT_WEIGHTS_PATH}" | awk '{print $1}')"
+}
+
 log "repo: ${REPO_ROOT}"
 log "env: ${ENV_PREFIX}"
 log "cuda toolkit: ${CUDA_VERSION}"
 log "torch: ${TORCH_VERSION} torchvision: ${TORCHVISION_VERSION} index: ${TORCH_INDEX_URL}"
 log "gsplat install: ${GSPLAT_INSTALL_MODE} ${GSPLAT_WHEEL_VERSION}"
+log "vggt weights: ${VGGT_WEIGHTS_PATH}"
+log "vggt weights url: ${VGGT_WEIGHTS_URL}"
+log "weights download workers: ${WEIGHTS_DOWNLOAD_WORKERS}"
 log "cuda arch: ${TORCH_CUDA_ARCH_LIST}"
-log "stages: create-env=${RUN_CREATE_ENV} cuda=${RUN_CUDA} torch=${RUN_TORCH} deps=${RUN_DEPS} gsplat=${RUN_GSPLAT} clean-gsplat=${CLEAN_GSPLAT} verify=${RUN_VERIFY}"
+log "stages: create-env=${RUN_CREATE_ENV} cuda=${RUN_CUDA} torch=${RUN_TORCH} deps=${RUN_DEPS} gsplat=${RUN_GSPLAT} weights=${RUN_WEIGHTS} clean-gsplat=${CLEAN_GSPLAT} verify=${RUN_VERIFY}"
 
 log "configuring GitHub proxy rewrite for pip git dependencies"
 git config --global url."https://gh-proxy.org/https://github.com/".insteadOf "https://github.com/"
@@ -201,6 +364,7 @@ export CUDA_HOME
 export CUDACXX="${CUDA_HOME}/bin/nvcc"
 export LD_LIBRARY_PATH="${ENV_PREFIX}/lib:${LD_LIBRARY_PATH:-}"
 export TORCH_EXTENSIONS_DIR
+export TORCH_HOME HF_HOME VGGT_WEIGHTS_PATH VGGT_WEIGHTS_URL
 
 if [[ "${RUN_CUDA}" == "1" ]]; then
     log "installing CUDA ${CUDA_VERSION} toolkit and ninja"
@@ -302,6 +466,12 @@ if [[ "${RUN_GSPLAT}" == "1" ]]; then
     fi
 else
     log "skipping gsplat build"
+fi
+
+if [[ "${RUN_WEIGHTS}" == "1" ]]; then
+    download_vggt_weights
+else
+    log "skipping VGGT weights download"
 fi
 
 if [[ "${RUN_VERIFY}" == "1" ]]; then
