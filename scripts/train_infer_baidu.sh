@@ -163,6 +163,9 @@ unset PYTHONHOME PYTHONPATH
 cd "${REPO_ROOT}"
 mkdir -p "${STDOUT_LOG_DIR}"
 STDOUT_LOG="${STDOUT_LOG_DIR}/${EXP_NAME}.log"
+export STDOUT_LOG
+touch "${STDOUT_LOG}"
+exec > >(tee -a "${STDOUT_LOG}") 2>&1
 
 log() {
     echo "[$(date '+%F %T')] $*"
@@ -178,7 +181,7 @@ require_path() {
 
 run_step() {
     log "command: CUDA_VISIBLE_DEVICES=${CVD} $*"
-    CUDA_VISIBLE_DEVICES="${CVD}" "$@" 2>&1 | tee -a "${STDOUT_LOG}"
+    CUDA_VISIBLE_DEVICES="${CVD}" "$@"
 }
 
 log "repo: ${REPO_ROOT}"
@@ -197,13 +200,13 @@ require_path "${REPO_ROOT}/ba_optimize.py"
 require_path "${REPO_ROOT}/train_gaussians.py"
 require_path "${REPO_ROOT}/evaluate.py"
 
-"${PYTHON_BIN}" - <<'PY' 2>&1 | tee -a "${STDOUT_LOG}"
+"${PYTHON_BIN}" - <<'PY'
 import sys
 print("python", sys.version.replace("\n", " "))
 PY
 
 log "checking python dependencies"
-"${PYTHON_BIN}" - <<'PY' 2>&1 | tee -a "${STDOUT_LOG}"
+"${PYTHON_BIN}" - <<'PY'
 import importlib
 missing = []
 for name in ("numpy", "PIL", "torch", "tqdm"):
