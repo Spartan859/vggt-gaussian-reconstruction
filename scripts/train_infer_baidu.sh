@@ -16,7 +16,6 @@ CANDIDATE_MULTIPLIER="${CANDIDATE_MULTIPLIER:-4}"
 
 CVD="${CVD:-0}"
 DEVICE="${DEVICE:-cuda}"
-VGGT_REPO="${VGGT_REPO:-${REPO_ROOT}/external/vggt}"
 IMPORT_COLMAP="${IMPORT_COLMAP:-}"
 USE_VGGT_BA="${USE_VGGT_BA:-0}"
 VGGT_EXTRA_ARGS="${VGGT_EXTRA_ARGS:-}"
@@ -241,12 +240,6 @@ if [[ "${RUN_VGGT}" == "1" ]]; then
         require_path "${IMPORT_COLMAP}"
         VGGT_CMD+=(--import-colmap "${IMPORT_COLMAP}")
     else
-        if [[ -z "${VGGT_REPO}" ]]; then
-            echo "Set VGGT_REPO=/path/to/vggt or IMPORT_COLMAP=/path/to/sparse/0 before running VGGT." >&2
-            exit 1
-        fi
-        require_path "${VGGT_REPO}/demo_colmap.py"
-        VGGT_CMD+=(--vggt-repo "${VGGT_REPO}")
         if [[ "${USE_VGGT_BA}" == "1" ]]; then
             VGGT_CMD+=(--use-ba)
         fi

@@ -22,14 +22,14 @@ Typical local pipeline:
 
 ```bash
 python prepare_data.py --video "大作业数据/数据3-场景.mp4" --out outputs/scene --num_frames 48
-python run_vggt.py --scene outputs/scene --device cuda --vggt-repo /path/to/vggt
+python run_vggt.py --scene outputs/scene --device cuda
 python ba_optimize.py --scene outputs/scene --iters 1000 --lr_pose 1e-3 --lr_points 1e-2
 python train_gaussians.py --scene outputs/scene --mode ba --steps 7000
 python evaluate.py --scene outputs/scene
 python viewer.py --scene outputs/scene --mode ba
 ```
 
-Full VGGT and Gaussian training require CUDA plus upstream VGGT and the installed `gsplat` package; CPU environments can run preparation and tests.
+Full VGGT and Gaussian training require CUDA plus installed `vggt` and `gsplat` packages; CPU environments can run preparation and tests.
 
 ## Coding Style & Naming Conventions
 
@@ -45,4 +45,4 @@ This repository currently has no commit history to infer a house style from. Use
 
 ## Security & Configuration Tips
 
-Do not commit local datasets, generated reconstructions, checkpoints, or cache files. `.gitignore` already excludes `大作业数据/`, `outputs/`, `__pycache__/`, `.pytest_cache/`, and package metadata. Keep machine-specific paths such as `--vggt-repo` in shell commands or local notes, not source files.
+Do not commit local datasets, generated reconstructions, checkpoints, or cache files. `.gitignore` already excludes `大作业数据/`, `outputs/`, `__pycache__/`, `.pytest_cache/`, and package metadata. Keep machine-specific paths in shell commands or local notes, not source files.

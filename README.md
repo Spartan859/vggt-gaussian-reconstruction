@@ -25,7 +25,7 @@ Baidu A800 environment, `scripts/setup_a800_env.sh` installs PyTorch
 
 ```bash
 python prepare_data.py --video "大作业数据/数据3-场景.mp4" --out outputs/scene --num_frames 48
-python run_vggt.py --scene outputs/scene --device cuda --vggt-repo /path/to/vggt
+python run_vggt.py --scene outputs/scene --device cuda
 python ba_optimize.py --scene outputs/scene --iters 1000 --lr_pose 1e-3 --lr_points 1e-2
 python train_gaussians.py --scene outputs/scene --mode vggt --steps 7000
 python train_gaussians.py --scene outputs/scene --mode ba --steps 7000
@@ -61,8 +61,8 @@ outputs/scene/
 
 ## Notes
 
-- `run_vggt.py` expects an upstream VGGT checkout with `demo_colmap.py`, or an
-  already-exported COLMAP sparse model supplied with `--import-colmap`.
+- `run_vggt.py` uses the installed `vggt` package, or an already-exported
+  COLMAP sparse model supplied with `--import-colmap`.
 - `ba_optimize.py` is a local PyTorch implementation. It refines per-image
   SE(3) deltas and 3D points from COLMAP observations using Huber reprojection
   loss.

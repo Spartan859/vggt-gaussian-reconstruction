@@ -23,6 +23,7 @@ TORCH_EXTENSIONS_DIR="${TORCH_EXTENSIONS_DIR:-${TMPDIR}/torch_extensions_${TORCH
 GSPLAT_INSTALL_MODE="${GSPLAT_INSTALL_MODE:-wheel}"
 GSPLAT_WHEEL_VERSION="${GSPLAT_WHEEL_VERSION:-1.5.3+pt23cu118}"
 GSPLAT_WHEEL_INDEX="${GSPLAT_WHEEL_INDEX:-https://docs.gsplat.studio/whl/pt23cu118/gsplat/}"
+VGGT_PACKAGE_SPEC="${VGGT_PACKAGE_SPEC:-git+https://gh-proxy.org/https://github.com/facebookresearch/vggt.git}"
 REQUIRE_CUDA="${REQUIRE_CUDA:-0}"
 
 RUN_CREATE_ENV="${RUN_CREATE_ENV:-1}"
@@ -203,13 +204,22 @@ fi
 if [[ "${RUN_DEPS}" == "1" ]]; then
     FILTERED_REQ_DIR="${TMPDIR}/filtered_requirements"
     mkdir -p "${FILTERED_REQ_DIR}"
-    for req in \
-        external/vggt/requirements.txt \
-        external/vggt/requirements_demo.txt
-    do
-        filtered="${FILTERED_REQ_DIR}/$(basename "$(dirname "${req}")")_$(basename "${req}")"
-        grep -Eiv '^[[:space:]]*((torch|torchvision|torchaudio|numpy|nvidia-ncore)([<=>[:space:]]|==|$)|git\+https://github\.com/jytime/LightGlue\.git)' "${req}" > "${filtered}"
-    done
+    cat > "${FILTERED_REQ_DIR}/vggt_demo_deps.txt" <<'EOF'
+gradio==5.17.1
+viser==0.2.23
+tqdm
+hydra-core
+omegaconf
+opencv-python
+scipy
+onnxruntime
+requests
+trimesh
+matplotlib
+pydantic==2.10.6
+pycolmap==3.10.0
+pyceres==2.3
+EOF
 
     log "installing build helpers and numpy ${NUMPY_VERSION}"
     TMPDIR="${TMPDIR}" PIP_CACHE_DIR="${PIP_CACHE_DIR}" "${PYTHON_BIN}" -m pip install --upgrade \
@@ -217,11 +227,16 @@ if [[ "${RUN_DEPS}" == "1" ]]; then
     TMPDIR="${TMPDIR}" PIP_CACHE_DIR="${PIP_CACHE_DIR}" "${PYTHON_BIN}" -m pip install --force-reinstall \
         numpy=="${NUMPY_VERSION}"
 
-    log "installing project and VGGT dependencies"
+    log "installing project"
     TMPDIR="${TMPDIR}" PIP_CACHE_DIR="${PIP_CACHE_DIR}" "${PYTHON_BIN}" -m pip install -e .
+
+    log "installing VGGT package"
+    TMPDIR="${TMPDIR}" PIP_CACHE_DIR="${PIP_CACHE_DIR}" "${PYTHON_BIN}" -m pip install "${VGGT_PACKAGE_SPEC}" --no-deps
+
+    log "installing VGGT runtime dependencies"
     TMPDIR="${TMPDIR}" PIP_CACHE_DIR="${PIP_CACHE_DIR}" "${PYTHON_BIN}" -m pip install \
-        -r "${FILTERED_REQ_DIR}/vggt_requirements.txt" \
-        -r "${FILTERED_REQ_DIR}/vggt_requirements_demo.txt"
+        "Pillow" huggingface_hub einops safetensors \
+        -r "${FILTERED_REQ_DIR}/vggt_demo_deps.txt"
     TMPDIR="${TMPDIR}" PIP_CACHE_DIR="${PIP_CACHE_DIR}" "${PYTHON_BIN}" -m pip install \
         "git+https://gh-proxy.org/https://github.com/jytime/LightGlue.git#egg=lightglue"
 else
@@ -270,7 +285,6 @@ fi
 if [[ "${RUN_VERIFY}" == "1" ]]; then
     log "verifying imports"
     MPLCONFIGDIR="${TMPDIR}/matplotlib" \
-    PYTHONPATH="${REPO_ROOT}/external/vggt" \
     "${PYTHON_BIN}" - <<'PY'
 import importlib
 import os
