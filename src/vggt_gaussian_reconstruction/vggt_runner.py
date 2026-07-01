@@ -90,15 +90,14 @@ def run_vggt_package(config: VggtConfig) -> Path:
     intrinsic_np = intrinsic.detach().squeeze(0).cpu().numpy()
     depth_map_np = depth_map.detach().squeeze(0).cpu().numpy()
     points_3d_map = unproject_depth_map_to_point_map(depth_map_np, extrinsic_np, intrinsic_np)
-    points_3d_map_tensor = torch.as_tensor(points_3d_map, dtype=images.dtype, device=device)
-    depth_conf_tensor = depth_conf.detach().squeeze(0).to(device)
+    depth_conf_for_tracks, points_3d_for_tracks = _prepare_tracker_inputs(depth_conf, points_3d_map)
 
     with torch.no_grad(), torch.cuda.amp.autocast(dtype=dtype):
         _configure_vggsfm_tracker_loader()
         pred_tracks, pred_vis_scores, _pred_confs, points_3d, points_rgb = predict_tracks(
             images,
-            conf=depth_conf_tensor,
-            points_3d=points_3d_map_tensor,
+            conf=depth_conf_for_tracks,
+            points_3d=points_3d_for_tracks,
             masks=None,
             max_query_pts=config.max_query_pts,
             query_frame_num=config.query_frame_num,
@@ -140,6 +139,14 @@ def run_vggt_package(config: VggtConfig) -> Path:
     sparse_zero = config.scene / "vggt" / "sparse" / "0"
     _write_pycolmap_reconstruction(reconstruction, sparse_zero)
     return sparse_zero
+
+
+def _prepare_tracker_inputs(depth_conf: torch.Tensor, points_3d_map: np.ndarray) -> tuple[torch.Tensor, torch.Tensor]:
+    # VGGT's tracker indexes these with NumPy arrays and then uses the resulting
+    # mask on NumPy colors, so keep them on CPU to avoid implicit CUDA->NumPy conversion.
+    conf = depth_conf.detach().squeeze(0).float().cpu()
+    points = torch.as_tensor(points_3d_map, dtype=torch.float32, device="cpu")
+    return conf, points
 
 
 def _configure_torch_hub() -> None:

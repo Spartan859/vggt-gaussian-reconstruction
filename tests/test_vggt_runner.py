@@ -8,6 +8,7 @@ import torch
 from vggt_gaussian_reconstruction.vggt_runner import (
     _configure_torch_hub,
     _configure_vggsfm_tracker_loader,
+    _prepare_tracker_inputs,
     _rename_and_rescale,
     _select_ba_points,
     _write_pycolmap_reconstruction,
@@ -150,3 +151,17 @@ def test_configure_vggsfm_tracker_loader_replaces_dino_ranking() -> None:
     ranks = track_predict.generate_rank_by_dino(np.zeros((5, 3, 4, 4)), query_frame_num=3, device="cpu")
 
     assert ranks == [0, 2, 4]
+
+
+def test_prepare_tracker_inputs_keeps_track_filters_on_cpu() -> None:
+    depth_conf = torch.ones((1, 2, 3), dtype=torch.float16)
+    points_3d = np.ones((2, 3, 3), dtype=np.float64)
+
+    conf, points = _prepare_tracker_inputs(depth_conf, points_3d)
+
+    assert conf.device.type == "cpu"
+    assert points.device.type == "cpu"
+    assert conf.dtype == torch.float32
+    assert points.dtype == torch.float32
+    assert conf.shape == (2, 3)
+    assert points.shape == (2, 3, 3)
