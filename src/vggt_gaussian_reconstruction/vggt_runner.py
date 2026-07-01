@@ -101,13 +101,16 @@ def run_vggt_package(config: VggtConfig) -> Path:
     )
     _rename_and_rescale(reconstruction, [p.name for p in image_paths], original_coords, fixed_resolution)
 
-    sparse_root = config.scene / "vggt" / "sparse"
-    sparse_zero = sparse_root / "0"
-    if sparse_zero.exists():
-        shutil.rmtree(sparse_zero)
-    sparse_root.mkdir(parents=True, exist_ok=True)
-    reconstruction.write(str(sparse_zero))
+    sparse_zero = config.scene / "vggt" / "sparse" / "0"
+    _write_pycolmap_reconstruction(reconstruction, sparse_zero)
     return sparse_zero
+
+
+def _write_pycolmap_reconstruction(reconstruction, output_dir: Path) -> None:
+    if output_dir.exists():
+        shutil.rmtree(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    reconstruction.write(str(output_dir))
 
 
 def _rename_and_rescale(reconstruction, image_names: list[str], original_coords: np.ndarray, image_size: int) -> None:

@@ -30,6 +30,7 @@ def main() -> None:
     if args.import_colmap:
         if out_sparse.exists():
             shutil.rmtree(out_sparse)
+        out_sparse.parent.mkdir(parents=True, exist_ok=True)
         shutil.copytree(args.import_colmap, out_sparse)
         print(f"Imported COLMAP model to {out_sparse}")
         return
