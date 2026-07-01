@@ -6,6 +6,11 @@ from typing import Iterable
 
 import numpy as np
 
+try:
+    from pycolmap import Reconstruction as PycolmapReconstruction
+except Exception:  # pragma: no cover - optional runtime dependency path
+    PycolmapReconstruction = None
+
 
 @dataclass
 class Camera:
@@ -45,6 +50,13 @@ class Reconstruction:
 
 def read_model(path: Path | str) -> Reconstruction:
     path = Path(path)
+    if _has_colmap_bin(path):
+        if PycolmapReconstruction is not None:
+            model = PycolmapReconstruction(str(path))
+            return _from_pycolmap(model)
+        raise RuntimeError(
+            f"Detected COLMAP binary model in {path}, but pycolmap is not available to read it."
+        )
     return Reconstruction(
         cameras=read_cameras_text(path / "cameras.txt"),
         images=read_images_text(path / "images.txt"),
@@ -58,6 +70,62 @@ def write_model(model: Reconstruction, path: Path | str) -> None:
     write_cameras_text(model.cameras.values(), path / "cameras.txt")
     write_images_text(model.images.values(), path / "images.txt")
     write_points3d_text(model.points3d.values(), path / "points3D.txt")
+
+
+def _has_colmap_bin(path: Path) -> bool:
+    return any((path / name).exists() for name in ("cameras.bin", "images.bin", "points3D.bin"))
+
+
+def _from_pycolmap(model) -> Reconstruction:
+    cameras = {}
+    for cam_id, cam in model.cameras.items():
+        cam_dict = cam.todict()
+        cameras[int(cam_id)] = Camera(
+            id=int(cam_id),
+            model=str(cam_dict["model"]).split(".")[-1],
+            width=int(cam_dict["width"]),
+            height=int(cam_dict["height"]),
+            params=np.array(cam_dict["params"], dtype=np.float64),
+        )
+
+    images = {}
+    for image_id, image in model.images.items():
+        image_dict = image.todict()
+        points2d = image_dict.get("points2D", [])
+        xys = np.array([[p["xy"][0], p["xy"][1]] for p in points2d], dtype=np.float64)
+        point3d_ids = np.array([p.get("point3D_id", -1) for p in points2d], dtype=np.int64)
+        if xys.size == 0:
+            xys = np.zeros((0, 2), dtype=np.float64)
+        if point3d_ids.size == 0:
+            point3d_ids = np.zeros((0,), dtype=np.int64)
+        cam_from_world = image_dict["cam_from_world"]
+        qvec = np.array(cam_from_world["rotation"]["quat"], dtype=np.float64)
+        tvec = np.array(cam_from_world["translation"], dtype=np.float64)
+        images[int(image_id)] = Image(
+            id=int(image_id),
+            qvec=qvec,
+            tvec=tvec,
+            camera_id=int(image_dict["camera_id"]),
+            name=str(image_dict["name"]),
+            xys=xys,
+            point3d_ids=point3d_ids,
+        )
+
+    points3d = {}
+    for point_id, point in model.points3D.items():
+        point_dict = point.todict()
+        track = []
+        for elem in point_dict.get("track", {}).get("elements", []):
+            track.append((int(elem["image_id"]), int(elem["point2D_idx"])))
+        points3d[int(point_id)] = Point3D(
+            id=int(point_id),
+            xyz=np.array(point_dict["xyz"], dtype=np.float64),
+            rgb=np.array(point_dict["color"], dtype=np.uint8),
+            error=float(point_dict["error"]),
+            track=track,
+        )
+
+    return Reconstruction(cameras=cameras, images=images, points3d=points3d)
 
 
 def read_cameras_text(path: Path) -> dict[int, Camera]:
