@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from vggt_gaussian_reconstruction.colmap import has_model
 from vggt_gaussian_reconstruction.gaussian_trainer import TrainConfig, train_gaussians
 
 
@@ -23,7 +24,7 @@ def main() -> None:
     sparse = args.scene / args.mode / "sparse" / "0"
     images = args.scene / "images"
     output = args.scene / f"gaussians_{args.mode}"
-    if not (sparse / "cameras.txt").exists():
+    if not has_model(sparse):
         raise SystemExit(f"Missing sparse model: {sparse}")
     if not images.exists():
         raise SystemExit(f"Missing images directory: {images}")

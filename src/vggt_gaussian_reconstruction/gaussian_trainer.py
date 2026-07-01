@@ -36,7 +36,7 @@ def train_gaussians(config: TrainConfig) -> None:
     means_np, colors_np = _initial_points(model, config.max_points)
 
     if len(means_np) == 0:
-        raise ValueError(f"No 3D points found in {config.sparse_dir / 'points3D.txt'}")
+        raise ValueError(f"No 3D points found in {config.sparse_dir}")
 
     means = torch.nn.Parameter(torch.as_tensor(means_np, dtype=torch.float32, device=device))
     rgb_logits = torch.nn.Parameter(_safe_logit(torch.as_tensor(colors_np, dtype=torch.float32, device=device)))

@@ -267,8 +267,14 @@ if [[ "${RUN_VGGT}" == "1" ]]; then
     run_step "${VGGT_CMD[@]}"
 else
     log "skipping VGGT/COLMAP initialization"
-    require_path "${SCENE_DIR}/vggt/sparse/0/cameras.txt"
-    require_path "${SCENE_DIR}/vggt/sparse/0/images.txt"
+    if [[ ! -e "${SCENE_DIR}/vggt/sparse/0/cameras.txt" && ! -e "${SCENE_DIR}/vggt/sparse/0/cameras.bin" ]]; then
+        echo "Missing sparse model: ${SCENE_DIR}/vggt/sparse/0" >&2
+        exit 1
+    fi
+    if [[ ! -e "${SCENE_DIR}/vggt/sparse/0/images.txt" && ! -e "${SCENE_DIR}/vggt/sparse/0/images.bin" ]]; then
+        echo "Missing sparse model: ${SCENE_DIR}/vggt/sparse/0" >&2
+        exit 1
+    fi
 fi
 
 if [[ "${RUN_BA}" == "1" ]]; then

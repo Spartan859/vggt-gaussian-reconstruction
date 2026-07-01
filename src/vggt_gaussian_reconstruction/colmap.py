@@ -76,6 +76,11 @@ def _has_colmap_bin(path: Path) -> bool:
     return any((path / name).exists() for name in ("cameras.bin", "images.bin", "points3D.bin"))
 
 
+def has_model(path: Path | str) -> bool:
+    path = Path(path)
+    return _has_colmap_bin(path) or all((path / name).exists() for name in ("cameras.txt", "images.txt"))
+
+
 def _from_pycolmap(model) -> Reconstruction:
     cameras = {}
     for cam_id, cam in model.cameras.items():
