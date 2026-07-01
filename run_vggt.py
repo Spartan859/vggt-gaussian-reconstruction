@@ -18,6 +18,13 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--conf-threshold", type=float, default=5.0)
     parser.add_argument("--max-points", type=int, default=100_000)
+    parser.add_argument("--max-reproj-error", type=float, default=8.0)
+    parser.add_argument("--vis-thresh", type=float, default=0.2)
+    parser.add_argument("--query-frame-num", type=int, default=8)
+    parser.add_argument("--max-query-pts", type=int, default=4096)
+    parser.add_argument("--camera-type", default="SIMPLE_PINHOLE")
+    parser.add_argument("--shared-camera", action="store_true")
+    parser.add_argument("--no-fine-tracking", action="store_true")
     parser.add_argument("--extra-args", nargs=argparse.REMAINDER, default=[], help="Extra args forwarded to VGGT.")
     args = parser.parse_args()
 
@@ -47,6 +54,13 @@ def main() -> None:
             seed=args.seed,
             conf_threshold=args.conf_threshold,
             max_points=args.max_points,
+            max_reproj_error=args.max_reproj_error,
+            vis_thresh=args.vis_thresh,
+            query_frame_num=args.query_frame_num,
+            max_query_pts=args.max_query_pts,
+            camera_type=args.camera_type,
+            shared_camera=args.shared_camera,
+            fine_tracking=not args.no_fine_tracking,
             extra_args=args.extra_args,
         )
     )

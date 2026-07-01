@@ -97,8 +97,8 @@ def _from_pycolmap(model) -> Reconstruction:
     for image_id, image in model.images.items():
         image_dict = image.todict()
         points2d = image_dict.get("points2D", [])
-        xys = np.array([[p["xy"][0], p["xy"][1]] for p in points2d], dtype=np.float64)
-        point3d_ids = np.array([p.get("point3D_id", -1) for p in points2d], dtype=np.int64)
+        xys = np.array([_point2d_xy(p) for p in points2d], dtype=np.float64)
+        point3d_ids = np.array([_point2d_point3d_id(p) for p in points2d], dtype=np.int64)
         if xys.size == 0:
             xys = np.zeros((0, 2), dtype=np.float64)
         if point3d_ids.size == 0:
@@ -121,7 +121,7 @@ def _from_pycolmap(model) -> Reconstruction:
         point_dict = point.todict()
         track = []
         for elem in point_dict.get("track", {}).get("elements", []):
-            track.append((int(elem["image_id"]), int(elem["point2D_idx"])))
+            track.append((_track_element_image_id(elem), _track_element_point2d_idx(elem)))
         points3d[int(point_id)] = Point3D(
             id=int(point_id),
             xyz=np.array(point_dict["xyz"], dtype=np.float64),
@@ -131,6 +131,36 @@ def _from_pycolmap(model) -> Reconstruction:
         )
 
     return Reconstruction(cameras=cameras, images=images, points3d=points3d)
+
+
+def _point2d_xy(point) -> list[float]:
+    if hasattr(point, "todict"):
+        point = point.todict()
+    if isinstance(point, dict):
+        xy = point["xy"]
+    else:
+        xy = point.xy
+    return [float(xy[0]), float(xy[1])]
+
+
+def _point2d_point3d_id(point) -> int:
+    if hasattr(point, "todict"):
+        point = point.todict()
+    if isinstance(point, dict):
+        return int(point.get("point3D_id", -1))
+    return int(point.point3D_id) if hasattr(point, "point3D_id") else -1
+
+
+def _track_element_image_id(elem) -> int:
+    if isinstance(elem, dict):
+        return int(elem["image_id"])
+    return int(elem.image_id)
+
+
+def _track_element_point2d_idx(elem) -> int:
+    if isinstance(elem, dict):
+        return int(elem["point2D_idx"])
+    return int(elem.point2D_idx)
 
 
 def read_cameras_text(path: Path) -> dict[int, Camera]:

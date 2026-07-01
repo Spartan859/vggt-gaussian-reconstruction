@@ -4,7 +4,7 @@ from pathlib import Path
 
 import numpy as np
 
-from vggt_gaussian_reconstruction.vggt_runner import _select_ba_points, _write_pycolmap_reconstruction
+from vggt_gaussian_reconstruction.vggt_runner import _rename_and_rescale, _select_ba_points, _write_pycolmap_reconstruction
 
 
 class DummyReconstruction:
@@ -17,6 +17,31 @@ class DummyReconstruction:
             raise ValueError(f"missing output directory: {output}")
         self.written_to = path
         (output / "cameras.bin").write_bytes(b"dummy")
+
+
+class DummyPoint2D:
+    def __init__(self, xy):
+        self.xy = np.array(xy, dtype=np.float64)
+
+
+class DummyCamera:
+    def __init__(self) -> None:
+        self.params = np.array([100.0, 100.0, 50.0, 50.0], dtype=np.float64)
+        self.width = 100
+        self.height = 100
+
+
+class DummyImage:
+    def __init__(self) -> None:
+        self.camera_id = 1
+        self.name = "old.png"
+        self.points2D = [DummyPoint2D([20.0, 30.0])]
+
+
+class DummyPycolmapReconstruction:
+    def __init__(self) -> None:
+        self.cameras = {1: DummyCamera()}
+        self.images = {1: DummyImage()}
 
 
 def test_write_pycolmap_reconstruction_creates_output_dir(tmp_path: Path) -> None:
@@ -33,6 +58,27 @@ def test_write_pycolmap_reconstruction_creates_output_dir(tmp_path: Path) -> Non
     assert not old_file.exists()
 
 
+def test_rename_and_rescale_shifts_ba_tracks_to_original_resolution() -> None:
+    reconstruction = DummyPycolmapReconstruction()
+    original_coords = np.array([[10.0, 20.0, 200.0, 100.0]], dtype=np.float64)
+
+    _rename_and_rescale(
+        reconstruction,
+        ["frame.png"],
+        original_coords,
+        image_size=100,
+        shift_point2d_to_original_res=True,
+    )
+
+    camera = reconstruction.cameras[1]
+    image = reconstruction.images[1]
+    assert image.name == "frame.png"
+    assert camera.width == 200
+    assert camera.height == 100
+    assert np.allclose(camera.params, [200.0, 200.0, 100.0, 50.0])
+    assert np.allclose(image.points2D[0].xy, [20.0, 20.0])
+
+
 def test_select_ba_points_falls_back_to_finite_points() -> None:
     world_points = np.array(
         [[[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]]],
@@ -47,6 +93,34 @@ def test_select_ba_points_falls_back_to_finite_points() -> None:
         points_rgb,
         max_points=10,
         conf_threshold=10.0,
+    )
+
+    assert points_3d.shape == (2, 3)
+    assert points_rgb_out.shape == (2, 3)
+    assert stats["selected"] == 2
+
+
+def test_select_ba_points_accepts_channel_first_rgb() -> None:
+    world_points = np.array(
+        [[[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]]],
+        dtype=np.float32,
+    )
+    world_points_conf = np.array([[[0.9, 0.9]]], dtype=np.float32)
+    points_rgb = np.array(
+        [[
+            [[10, 20]],
+            [[30, 40]],
+            [[50, 60]],
+        ]],
+        dtype=np.uint8,
+    )
+
+    points_3d, points_rgb_out, stats = _select_ba_points(
+        world_points,
+        world_points_conf,
+        points_rgb,
+        max_points=10,
+        conf_threshold=0.5,
     )
 
     assert points_3d.shape == (2, 3)

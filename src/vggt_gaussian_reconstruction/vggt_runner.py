@@ -12,7 +12,7 @@ import torch
 import torch.nn.functional as F
 
 from vggt.dependency.np_to_pycolmap import batch_np_matrix_to_pycolmap
-from vggt.dependency.projection import project_3D_points_np
+from vggt.dependency.track_predict import predict_tracks
 
 
 @dataclass
@@ -22,6 +22,13 @@ class VggtConfig:
     seed: int = 42
     conf_threshold: float = 5.0
     max_points: int = 100_000
+    max_reproj_error: float = 8.0
+    vis_thresh: float = 0.2
+    query_frame_num: int = 8
+    max_query_pts: int = 4096
+    camera_type: str = "SIMPLE_PINHOLE"
+    shared_camera: bool = False
+    fine_tracking: bool = True
     extra_args: list[str] = field(default_factory=list)
 
 
@@ -76,51 +83,57 @@ def run_vggt_package(config: VggtConfig) -> Path:
         aggregated_tokens, ps_idx = model.aggregator(infer_images[None])
         pose_enc = model.camera_head(aggregated_tokens)[-1]
         extrinsic, intrinsic = pose_encoding_to_extri_intri(pose_enc, infer_images.shape[-2:])
-    depth_map, depth_conf = model.depth_head(aggregated_tokens, infer_images[None], ps_idx)
-    if model.point_head is not None:
-        world_points, world_points_conf = model.point_head(aggregated_tokens, infer_images[None], ps_idx)
-    else:
-        world_points = unproject_depth_map_to_point_map(
-            depth_map.squeeze(0).cpu().numpy(), extrinsic.squeeze(0).cpu().numpy(), intrinsic.squeeze(0).cpu().numpy()
-        )[None]
-        world_points_conf = depth_conf
+        depth_map, depth_conf = model.depth_head(aggregated_tokens, infer_images[None], ps_idx)
 
-    extrinsic_np = extrinsic.squeeze(0).cpu().numpy()
-    intrinsic_np = intrinsic.squeeze(0).cpu().numpy()
-    world_points_np = world_points.squeeze(0).cpu().numpy()
-    world_points_conf_np = world_points_conf.squeeze(0).cpu().numpy()
-    points_rgb_np = (infer_images.squeeze(0).cpu().numpy() * 255).astype(np.uint8)
+    extrinsic_np = extrinsic.detach().squeeze(0).cpu().numpy()
+    intrinsic_np = intrinsic.detach().squeeze(0).cpu().numpy()
+    depth_map_np = depth_map.detach().squeeze(0).cpu().numpy()
+    points_3d_map = unproject_depth_map_to_point_map(depth_map_np, extrinsic_np, intrinsic_np)
+    points_3d_map_tensor = torch.as_tensor(points_3d_map, dtype=images.dtype, device=device)
+    depth_conf_tensor = depth_conf.detach().squeeze(0).to(device)
 
-    points_3d, points_rgb, source_stats = _select_ba_points(
-        world_points_np,
-        world_points_conf_np,
-        points_rgb_np,
-        max_points=config.max_points,
-        conf_threshold=config.conf_threshold,
-    )
-    tracks_2d, points_cam = project_3D_points_np(points_3d, extrinsic_np, intrinsic_np)
-    track_masks = np.isfinite(tracks_2d).all(axis=-1) & (points_cam[:, 2, :] > 1e-6)
-    track_masks &= (tracks_2d[..., 0] >= 0) & (tracks_2d[..., 0] < fixed_resolution)
-    track_masks &= (tracks_2d[..., 1] >= 0) & (tracks_2d[..., 1] < fixed_resolution)
+    with torch.no_grad(), torch.cuda.amp.autocast(dtype=dtype):
+        pred_tracks, pred_vis_scores, _pred_confs, points_3d, points_rgb = predict_tracks(
+            images,
+            conf=depth_conf_tensor,
+            points_3d=points_3d_map_tensor,
+            masks=None,
+            max_query_pts=config.max_query_pts,
+            query_frame_num=config.query_frame_num,
+            keypoint_extractor="aliked+sp",
+            fine_tracking=config.fine_tracking,
+        )
+        torch.cuda.empty_cache()
+
+    image_size = np.array(images.shape[-2:])
+    intrinsic_np[:, :2, :] *= load_resolution / fixed_resolution
+    track_masks = pred_vis_scores > config.vis_thresh
 
     reconstruction, inlier_mask = batch_np_matrix_to_pycolmap(
         points_3d,
         extrinsic_np,
         intrinsic_np,
-        tracks_2d,
-        np.array([fixed_resolution, fixed_resolution]),
+        pred_tracks,
+        image_size,
         masks=track_masks,
-        shared_camera=False,
-        camera_type="PINHOLE",
-        min_inlier_per_frame=1,
+        max_reproj_error=config.max_reproj_error,
+        shared_camera=config.shared_camera,
+        camera_type=config.camera_type,
         points_rgb=points_rgb,
     )
     if reconstruction is None:
         raise RuntimeError(
             "VGGT did not produce enough multi-view observations for BA. "
-            f"Selected {source_stats['selected']} dense points, but no valid reconstruction was built."
+            f"Generated {points_3d.shape[0]} tracked points, but no valid reconstruction was built."
         )
-    _rename_and_rescale(reconstruction, [p.name for p in image_paths], original_coords, fixed_resolution)
+    _rename_and_rescale(
+        reconstruction,
+        [p.name for p in image_paths],
+        original_coords,
+        load_resolution,
+        shift_point2d_to_original_res=True,
+        shared_camera=config.shared_camera,
+    )
 
     sparse_zero = config.scene / "vggt" / "sparse" / "0"
     _write_pycolmap_reconstruction(reconstruction, sparse_zero)
@@ -141,6 +154,7 @@ def _select_ba_points(
         raise ValueError(
             f"Expected world_points_conf to have shape {world_points.shape[:-1]}; got {world_points_conf.shape}"
         )
+    points_rgb = _normalize_points_rgb(points_rgb, world_points.shape)
 
     mask = np.isfinite(world_points_conf) & np.all(np.isfinite(world_points), axis=-1)
     mask &= world_points_conf >= conf_threshold
@@ -168,6 +182,17 @@ def _select_ba_points(
     return points_3d, points_rgb, stats
 
 
+def _normalize_points_rgb(points_rgb: np.ndarray, world_points_shape: tuple[int, ...]) -> np.ndarray:
+    if points_rgb.ndim != 4:
+        raise ValueError(f"Expected points_rgb to be 4D; got {points_rgb.shape}")
+    expected_shape = world_points_shape[:-1] + (3,)
+    if points_rgb.shape == expected_shape:
+        return points_rgb
+    if points_rgb.shape[0] == world_points_shape[0] and points_rgb.shape[1] == 3:
+        return np.transpose(points_rgb, (0, 2, 3, 1))
+    raise ValueError(f"Expected points_rgb to have shape {expected_shape} or (S, 3, H, W); got {points_rgb.shape}")
+
+
 def _write_pycolmap_reconstruction(reconstruction, output_dir: Path) -> None:
     if output_dir.exists():
         shutil.rmtree(output_dir)
@@ -175,23 +200,37 @@ def _write_pycolmap_reconstruction(reconstruction, output_dir: Path) -> None:
     reconstruction.write(str(output_dir))
 
 
-def _rename_and_rescale(reconstruction, image_names: list[str], original_coords: np.ndarray, image_size: int) -> None:
+def _rename_and_rescale(
+    reconstruction,
+    image_names: list[str],
+    original_coords: np.ndarray,
+    image_size: int,
+    *,
+    shift_point2d_to_original_res: bool = False,
+    shared_camera: bool = False,
+) -> None:
+    rescale_camera = True
     for image_id in reconstruction.images:
         image = reconstruction.images[image_id]
         camera = reconstruction.cameras[image.camera_id]
         image.name = image_names[image_id - 1]
         real_width, real_height = original_coords[image_id - 1, -2:]
         resize_ratio = max(real_width, real_height) / image_size
-        params = np.array(camera.params, copy=True)
-        params *= resize_ratio
-        params[-2:] = np.array([real_width / 2.0, real_height / 2.0])
-        camera.params = params
-        camera.width = int(real_width)
-        camera.height = int(real_height)
+        if rescale_camera:
+            params = np.array(camera.params, copy=True)
+            params *= resize_ratio
+            params[-2:] = np.array([real_width / 2.0, real_height / 2.0])
+            camera.params = params
+            camera.width = int(real_width)
+            camera.height = int(real_height)
 
-        top_left = original_coords[image_id - 1, :2]
-        for point2d in image.points2D:
-            point2d.xy = (point2d.xy - top_left) * resize_ratio
+        if shift_point2d_to_original_res:
+            top_left = original_coords[image_id - 1, :2]
+            for point2d in image.points2D:
+                point2d.xy = (point2d.xy - top_left) * resize_ratio
+
+        if shared_camera:
+            rescale_camera = False
 
 
 def _seed_everything(seed: int) -> None:

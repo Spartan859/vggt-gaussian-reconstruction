@@ -62,6 +62,7 @@ Options:
   --resume-from STAGE   Skip stages before STAGE. Stages: prepare, vggt, ba, gsplat, eval, viewer
   --skip-prepare        Do not extract frames; requires SCENE_DIR/images
   --skip-vggt           Do not run VGGT/COLMAP; requires SCENE_DIR/vggt/sparse/0 with bin or txt COLMAP files
+                        If that sparse model has no BA-ready observations, VGGT will be rerun.
   --skip-ba             Do not run bundle adjustment
   --skip-gsplat         Do not run Gaussian training
   --skip-eval           Do not run evaluation
@@ -185,6 +186,35 @@ require_path() {
     fi
 }
 
+is_ba_ready_sparse() {
+    local sparse_dir="$1"
+    local min_track_len="$2"
+    "${PYTHON_BIN}" - "$sparse_dir" "$min_track_len" <<'PY'
+from pathlib import Path
+import sys
+
+import numpy as np
+
+sys.path.insert(0, str(Path.cwd() / "src"))
+from vggt_gaussian_reconstruction.colmap import read_model
+
+sparse_dir = Path(sys.argv[1])
+min_track_len = int(sys.argv[2])
+try:
+    model = read_model(sparse_dir)
+except Exception:
+    raise SystemExit(1)
+
+usable_points = [
+    point
+    for point in model.points3d.values()
+    if len(point.track) >= min_track_len and np.all(np.isfinite(point.xyz))
+]
+observations = sum(len(point.track) for point in usable_points)
+raise SystemExit(0 if usable_points and observations > 0 else 1)
+PY
+}
+
 run_step() {
     log "command: CUDA_VISIBLE_DEVICES=${CVD} $*"
     CUDA_VISIBLE_DEVICES="${CVD}" "$@"
@@ -234,6 +264,13 @@ import torch
 print("torch", torch.__version__, "cuda", torch.cuda.is_available())
 PY
 
+if [[ "${RUN_BA}" == "1" && "${RUN_VGGT}" == "0" ]]; then
+    if ! is_ba_ready_sparse "${SCENE_DIR}/vggt/sparse/0" "${BA_MIN_TRACK_LEN}"; then
+        log "existing sparse model is missing or not BA-ready; forcing VGGT stage"
+        RUN_VGGT=1
+    fi
+fi
+
 if [[ "${RUN_PREPARE}" == "1" ]]; then
     log "starting frame extraction"
     require_path "${VIDEO_PATH}"
@@ -261,7 +298,7 @@ if [[ "${RUN_VGGT}" == "1" ]]; then
         if [[ -n "${VGGT_EXTRA_ARGS}" ]]; then
             # shellcheck disable=SC2206
             VGGT_EXTRA_ARGS_ARRAY=(${VGGT_EXTRA_ARGS})
-            VGGT_CMD+=(--extra-args "${VGGT_EXTRA_ARGS_ARRAY[@]}")
+            VGGT_CMD+=("${VGGT_EXTRA_ARGS_ARRAY[@]}")
         fi
     fi
     run_step "${VGGT_CMD[@]}"
@@ -278,15 +315,9 @@ else
 fi
 
 if [[ "${RUN_BA}" == "1" ]]; then
-    log "starting bundle adjustment"
+    log "starting pycolmap bundle adjustment"
     run_step "${PYTHON_BIN}" ba_optimize.py \
-        --scene "${SCENE_DIR}" \
-        --iters "${BA_ITERS}" \
-        --lr_pose "${BA_LR_POSE}" \
-        --lr_points "${BA_LR_POINTS}" \
-        --huber_delta "${BA_HUBER_DELTA}" \
-        --min_track_len "${BA_MIN_TRACK_LEN}" \
-        --device "${BA_DEVICE}"
+        --scene "${SCENE_DIR}"
 else
     log "skipping bundle adjustment"
 fi

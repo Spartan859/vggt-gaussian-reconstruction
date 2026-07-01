@@ -23,6 +23,15 @@ def main() -> None:
         if sparse.exists():
             report[mode] = {"reconstruction": reconstruction_summary(sparse)}
 
+    if args.render_dir_ba is None:
+        default_ba_renders = args.scene / "gaussians_ba" / "renders"
+        if default_ba_renders.exists():
+            args.render_dir_ba = default_ba_renders
+    if args.render_dir_vggt is None:
+        default_vggt_renders = args.scene / "gaussians_vggt" / "renders"
+        if default_vggt_renders.exists():
+            args.render_dir_vggt = default_vggt_renders
+
     if args.render_dir_vggt:
         report.setdefault("vggt", {})["render_metrics"] = image_metrics(args.render_dir_vggt, args.scene / "images")
     if args.render_dir_ba:

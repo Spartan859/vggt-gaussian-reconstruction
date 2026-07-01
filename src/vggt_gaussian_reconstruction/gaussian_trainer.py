@@ -145,7 +145,7 @@ def _render(means, quats, log_scales, opacity_logits, rgb_logits, camera, _image
         width=camera["width"],
         height=camera["height"],
         packed=True,
-        backgrounds=torch.ones((1, 3), dtype=means.dtype, device=means.device),
+        backgrounds=torch.ones((3,), dtype=means.dtype, device=means.device),
     )
     return colors[0, ..., :3].clamp(0.0, 1.0)
 

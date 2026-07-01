@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sys
+import types
 
 import numpy as np
 import torch
 from PIL import Image as PILImage
 
 from vggt_gaussian_reconstruction.colmap import Camera, Image, Point3D, Reconstruction, write_model
-from vggt_gaussian_reconstruction.gaussian_trainer import _initial_points, _load_training_views
+from vggt_gaussian_reconstruction.gaussian_trainer import _initial_points, _load_training_views, _render
 from vggt_gaussian_reconstruction.geometry import rotmat_to_qvec
 
 
@@ -32,3 +34,34 @@ def test_gaussian_trainer_loads_colmap_views(tmp_path: Path):
     assert targets[0].shape == (3, 4, 3)
     assert means.shape == (1, 3)
     assert np.allclose(colors, [[1.0, 128.0 / 255.0, 0.0]])
+
+
+def test_render_passes_packed_background_shape(monkeypatch):
+    captured = {}
+
+    def fake_rasterization(**kwargs):
+        captured["backgrounds_shape"] = tuple(kwargs["backgrounds"].shape)
+        return torch.ones((1, 2, 3, 3), dtype=kwargs["means"].dtype), None, None
+
+    fake_gsplat = types.ModuleType("gsplat")
+    fake_rendering = types.ModuleType("gsplat.rendering")
+    fake_rendering.rasterization = fake_rasterization
+    monkeypatch.setitem(sys.modules, "gsplat", fake_gsplat)
+    monkeypatch.setitem(sys.modules, "gsplat.rendering", fake_rendering)
+
+    means = torch.zeros((1, 3), dtype=torch.float32)
+    quats = torch.tensor([[1.0, 0.0, 0.0, 0.0]], dtype=torch.float32)
+    log_scales = torch.zeros((1, 3), dtype=torch.float32)
+    opacity_logits = torch.zeros((1,), dtype=torch.float32)
+    rgb_logits = torch.zeros((1, 3), dtype=torch.float32)
+    camera = {
+        "K": torch.eye(3, dtype=torch.float32),
+        "viewmat": torch.eye(4, dtype=torch.float32),
+        "width": 3,
+        "height": 2,
+    }
+
+    render = _render(means, quats, log_scales, opacity_logits, rgb_logits, camera, None)
+
+    assert captured["backgrounds_shape"] == (3,)
+    assert render.shape == (2, 3, 3)
