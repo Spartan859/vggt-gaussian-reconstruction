@@ -3,8 +3,15 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import torch
 
-from vggt_gaussian_reconstruction.vggt_runner import _rename_and_rescale, _select_ba_points, _write_pycolmap_reconstruction
+from vggt_gaussian_reconstruction.vggt_runner import (
+    _configure_torch_hub,
+    _configure_vggsfm_tracker_loader,
+    _rename_and_rescale,
+    _select_ba_points,
+    _write_pycolmap_reconstruction,
+)
 
 
 class DummyReconstruction:
@@ -126,3 +133,20 @@ def test_select_ba_points_accepts_channel_first_rgb() -> None:
     assert points_3d.shape == (2, 3)
     assert points_rgb_out.shape == (2, 3)
     assert stats["selected"] == 2
+
+
+def test_configure_torch_hub_uses_torch_home(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("TORCH_HOME", str(tmp_path / "torch"))
+
+    _configure_torch_hub()
+
+    assert Path(torch.hub.get_dir()) == tmp_path / "torch" / "hub"
+
+
+def test_configure_vggsfm_tracker_loader_replaces_dino_ranking() -> None:
+    from vggt.dependency import track_predict
+
+    _configure_vggsfm_tracker_loader()
+    ranks = track_predict.generate_rank_by_dino(np.zeros((5, 3, 4, 4)), query_frame_num=3, device="cpu")
+
+    assert ranks == [0, 2, 4]

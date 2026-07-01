@@ -43,6 +43,8 @@ TORCH_HOME="${TORCH_HOME:-${REPO_ROOT}/.cache/torch}"
 HF_HOME="${HF_HOME:-${REPO_ROOT}/.cache/huggingface}"
 VGGT_WEIGHTS_PATH="${VGGT_WEIGHTS_PATH:-${TORCH_HOME}/hub/checkpoints/model.pt}"
 VGGT_WEIGHTS_URL="${VGGT_WEIGHTS_URL:-https://hf-mirror.com/facebook/VGGT-1B/resolve/main/model.pt}"
+VGGSFM_TRACKER_WEIGHTS_PATH="${VGGSFM_TRACKER_WEIGHTS_PATH:-${TORCH_HOME}/hub/checkpoints/vggsfm_v2_tracker.pt}"
+VGGSFM_TRACKER_WEIGHTS_URL="${VGGSFM_TRACKER_WEIGHTS_URL:-https://hf-mirror.com/facebook/VGGSfM/resolve/main/vggsfm_v2_tracker.pt}"
 
 RUN_PREPARE="${RUN_PREPARE:-1}"
 RUN_VGGT="${RUN_VGGT:-1}"
@@ -164,7 +166,7 @@ done
 export PATH="${ENV_PREFIX}/bin:${PATH}"
 export CONDA_PREFIX="${ENV_PREFIX}"
 export LD_LIBRARY_PATH="${ENV_PREFIX}/lib:${LD_LIBRARY_PATH:-}"
-export TORCH_HOME HF_HOME VGGT_WEIGHTS_PATH VGGT_WEIGHTS_URL
+export TORCH_HOME HF_HOME VGGT_WEIGHTS_PATH VGGT_WEIGHTS_URL VGGSFM_TRACKER_WEIGHTS_PATH VGGSFM_TRACKER_WEIGHTS_URL
 unset PYTHONHOME PYTHONPATH
 
 cd "${REPO_ROOT}"
@@ -230,6 +232,8 @@ log "torch home: ${TORCH_HOME}"
 log "hf home: ${HF_HOME}"
 log "vggt weights: ${VGGT_WEIGHTS_PATH}"
 log "vggt weights url: ${VGGT_WEIGHTS_URL}"
+log "vggsfm tracker weights: ${VGGSFM_TRACKER_WEIGHTS_PATH}"
+log "vggsfm tracker weights url: ${VGGSFM_TRACKER_WEIGHTS_URL}"
 log "CVD: ${CVD}"
 log "device: ${DEVICE}"
 log "stdout log: ${STDOUT_LOG}"

@@ -28,6 +28,8 @@ TORCH_HOME="${TORCH_HOME:-${REPO_ROOT}/.cache/torch}"
 HF_HOME="${HF_HOME:-${REPO_ROOT}/.cache/huggingface}"
 VGGT_WEIGHTS_PATH="${VGGT_WEIGHTS_PATH:-${TORCH_HOME}/hub/checkpoints/model.pt}"
 VGGT_WEIGHTS_URL="${VGGT_WEIGHTS_URL:-https://hf-mirror.com/facebook/VGGT-1B/resolve/main/model.pt}"
+VGGSFM_TRACKER_WEIGHTS_PATH="${VGGSFM_TRACKER_WEIGHTS_PATH:-${TORCH_HOME}/hub/checkpoints/vggsfm_v2_tracker.pt}"
+VGGSFM_TRACKER_WEIGHTS_URL="${VGGSFM_TRACKER_WEIGHTS_URL:-https://hf-mirror.com/facebook/VGGSfM/resolve/main/vggsfm_v2_tracker.pt}"
 WEIGHTS_DOWNLOAD_WORKERS="${WEIGHTS_DOWNLOAD_WORKERS:-8}"
 REQUIRE_CUDA="${REQUIRE_CUDA:-0}"
 
@@ -192,21 +194,32 @@ repair_ffmpeg_openh264() {
 }
 
 download_vggt_weights() {
-    mkdir -p "$(dirname "${VGGT_WEIGHTS_PATH}")" "${HF_HOME}"
-    if [[ -s "${VGGT_WEIGHTS_PATH}" ]]; then
-        log "VGGT weights already exist: ${VGGT_WEIGHTS_PATH}"
+    download_weight_file "VGGT weights" "${VGGT_WEIGHTS_URL}" "${VGGT_WEIGHTS_PATH}"
+}
+
+download_vggsfm_tracker_weights() {
+    download_weight_file "VGGSfM tracker weights" "${VGGSFM_TRACKER_WEIGHTS_URL}" "${VGGSFM_TRACKER_WEIGHTS_PATH}"
+}
+
+download_weight_file() {
+    local label="$1"
+    local url="$2"
+    local target_path="$3"
+    mkdir -p "$(dirname "${target_path}")" "${HF_HOME}"
+    if [[ -s "${target_path}" ]]; then
+        log "${label} already exist: ${target_path}"
         return
     fi
-    log "downloading VGGT weights"
-    log "url: ${VGGT_WEIGHTS_URL}"
-    log "path: ${VGGT_WEIGHTS_PATH}"
+    log "downloading ${label}"
+    log "url: ${url}"
+    log "path: ${target_path}"
     log "workers: ${WEIGHTS_DOWNLOAD_WORKERS}"
-    local tmp_path="${VGGT_WEIGHTS_PATH}.part"
+    local tmp_path="${target_path}.part"
     local downloaded=0
     if [[ -x "${PYTHON_BIN}" && "${WEIGHTS_DOWNLOAD_WORKERS}" -gt 1 ]]; then
         set +e
-        VGGT_WEIGHTS_URL="${VGGT_WEIGHTS_URL}" \
-        VGGT_WEIGHTS_PATH="${VGGT_WEIGHTS_PATH}" \
+        WEIGHTS_URL="${url}" \
+        WEIGHTS_PATH="${target_path}" \
         WEIGHTS_DOWNLOAD_WORKERS="${WEIGHTS_DOWNLOAD_WORKERS}" \
         "${PYTHON_BIN}" - <<'PY'
 import concurrent.futures
@@ -219,8 +232,8 @@ import time
 import urllib.error
 import urllib.request
 
-url = os.environ["VGGT_WEIGHTS_URL"]
-target = Path(os.environ["VGGT_WEIGHTS_PATH"])
+url = os.environ["WEIGHTS_URL"]
+target = Path(os.environ["WEIGHTS_PATH"])
 workers = max(1, int(os.environ.get("WEIGHTS_DOWNLOAD_WORKERS", "8")))
 tmp_path = target.with_name(target.name + ".part")
 parts_dir = target.with_name(target.name + ".parts")
@@ -306,7 +319,7 @@ PY
         elif [[ "${status}" == "2" ]]; then
             echo "parallel range download is unavailable; falling back to curl/wget" >&2
         else
-            exit "${status}"
+            echo "parallel range download failed with status ${status}; falling back to curl/wget" >&2
         fi
     fi
     if [[ "${downloaded}" != "1" ]]; then
@@ -314,22 +327,22 @@ PY
             curl -L --fail --retry 5 --retry-delay 5 --connect-timeout 30 \
                 --continue-at - \
                 --output "${tmp_path}" \
-                "${VGGT_WEIGHTS_URL}"
+                "${url}"
         elif command -v wget >/dev/null 2>&1; then
             wget --tries=5 --timeout=30 --continue \
                 --output-document="${tmp_path}" \
-                "${VGGT_WEIGHTS_URL}"
+                "${url}"
         else
-            echo "Neither curl nor wget is available for downloading VGGT weights." >&2
+            echo "Neither curl nor wget is available for downloading ${label}." >&2
             exit 1
         fi
     fi
     if [[ ! -s "${tmp_path}" ]]; then
-        echo "Downloaded VGGT weights file is empty: ${tmp_path}" >&2
+        echo "Downloaded ${label} file is empty: ${tmp_path}" >&2
         exit 1
     fi
-    mv "${tmp_path}" "${VGGT_WEIGHTS_PATH}"
-    log "downloaded VGGT weights: $(du -h "${VGGT_WEIGHTS_PATH}" | awk '{print $1}')"
+    mv "${tmp_path}" "${target_path}"
+    log "downloaded ${label}: $(du -h "${target_path}" | awk '{print $1}')"
 }
 
 log "repo: ${REPO_ROOT}"
@@ -339,13 +352,19 @@ log "torch: ${TORCH_VERSION} torchvision: ${TORCHVISION_VERSION} index: ${TORCH_
 log "gsplat install: ${GSPLAT_INSTALL_MODE} ${GSPLAT_WHEEL_VERSION}"
 log "vggt weights: ${VGGT_WEIGHTS_PATH}"
 log "vggt weights url: ${VGGT_WEIGHTS_URL}"
+log "vggsfm tracker weights: ${VGGSFM_TRACKER_WEIGHTS_PATH}"
+log "vggsfm tracker weights url: ${VGGSFM_TRACKER_WEIGHTS_URL}"
 log "weights download workers: ${WEIGHTS_DOWNLOAD_WORKERS}"
 log "cuda arch: ${TORCH_CUDA_ARCH_LIST}"
 log "stages: create-env=${RUN_CREATE_ENV} cuda=${RUN_CUDA} torch=${RUN_TORCH} deps=${RUN_DEPS} gsplat=${RUN_GSPLAT} weights=${RUN_WEIGHTS} clean-gsplat=${CLEAN_GSPLAT} verify=${RUN_VERIFY}"
 
 log "configuring GitHub proxy rewrite for pip git dependencies"
-git config --global url."https://gh-proxy.org/https://github.com/".insteadOf "https://github.com/"
-git config --global url."https://gh-proxy.org/https://github.com/".insteadOf "git@github.com:"
+if ! git config --global url."https://gh-proxy.org/https://github.com/".insteadOf "https://github.com/"; then
+    log "warning: failed to write global git proxy config; continuing"
+fi
+if ! git config --global url."https://gh-proxy.org/https://github.com/".insteadOf "git@github.com:"; then
+    log "warning: failed to write global git proxy config; continuing"
+fi
 
 if [[ "${RUN_CREATE_ENV}" == "1" && ! -x "${PYTHON_BIN}" ]]; then
     log "creating micromamba env"
@@ -364,7 +383,7 @@ export CUDA_HOME
 export CUDACXX="${CUDA_HOME}/bin/nvcc"
 export LD_LIBRARY_PATH="${ENV_PREFIX}/lib:${LD_LIBRARY_PATH:-}"
 export TORCH_EXTENSIONS_DIR
-export TORCH_HOME HF_HOME VGGT_WEIGHTS_PATH VGGT_WEIGHTS_URL
+export TORCH_HOME HF_HOME VGGT_WEIGHTS_PATH VGGT_WEIGHTS_URL VGGSFM_TRACKER_WEIGHTS_PATH VGGSFM_TRACKER_WEIGHTS_URL
 
 if [[ "${RUN_CUDA}" == "1" ]]; then
     log "installing CUDA ${CUDA_VERSION} toolkit and ninja"
@@ -470,8 +489,9 @@ fi
 
 if [[ "${RUN_WEIGHTS}" == "1" ]]; then
     download_vggt_weights
+    download_vggsfm_tracker_weights
 else
-    log "skipping VGGT weights download"
+    log "skipping VGGT/VGGSfM weights download"
 fi
 
 if [[ "${RUN_VERIFY}" == "1" ]]; then
@@ -480,6 +500,7 @@ if [[ "${RUN_VERIFY}" == "1" ]]; then
     "${PYTHON_BIN}" - <<'PY'
 import importlib
 import os
+from pathlib import Path
 import torch
 
 mods = [
@@ -495,6 +516,11 @@ for name in mods:
     print("OK", name)
 print("torch", torch.__version__, "cuda build", torch.version.cuda)
 print("cuda available", torch.cuda.is_available(), "gpu count", torch.cuda.device_count())
+for env_name in ("VGGT_WEIGHTS_PATH", "VGGSFM_TRACKER_WEIGHTS_PATH"):
+    path = Path(os.environ[env_name])
+    print(env_name, path, path.exists(), path.stat().st_size if path.exists() else 0)
+    if not path.exists() or path.stat().st_size == 0:
+        raise SystemExit(f"Missing required weights: {path}")
 if os.environ.get("REQUIRE_CUDA", "0") == "1" and not torch.cuda.is_available():
     raise SystemExit("CUDA is not available; rerun on a GPU node or set REQUIRE_CUDA=0.")
 PY

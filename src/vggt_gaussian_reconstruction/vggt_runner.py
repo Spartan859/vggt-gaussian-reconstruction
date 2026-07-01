@@ -34,6 +34,7 @@ class VggtConfig:
 
 def run_vggt_package(config: VggtConfig) -> Path:
     _seed_everything(config.seed)
+    _configure_torch_hub()
     device = torch.device(config.device if torch.cuda.is_available() or config.device == "cpu" else "cpu")
     if device.type != "cuda":
         raise RuntimeError("VGGT package inference requires CUDA for the full pipeline.")
@@ -93,6 +94,7 @@ def run_vggt_package(config: VggtConfig) -> Path:
     depth_conf_tensor = depth_conf.detach().squeeze(0).to(device)
 
     with torch.no_grad(), torch.cuda.amp.autocast(dtype=dtype):
+        _configure_vggsfm_tracker_loader()
         pred_tracks, pred_vis_scores, _pred_confs, points_3d, points_rgb = predict_tracks(
             images,
             conf=depth_conf_tensor,
@@ -138,6 +140,70 @@ def run_vggt_package(config: VggtConfig) -> Path:
     sparse_zero = config.scene / "vggt" / "sparse" / "0"
     _write_pycolmap_reconstruction(reconstruction, sparse_zero)
     return sparse_zero
+
+
+def _configure_torch_hub() -> None:
+    torch_home = os.environ.get("TORCH_HOME")
+    if torch_home:
+        torch.hub.set_dir(str(Path(torch_home) / "hub"))
+
+
+def _configure_vggsfm_tracker_loader() -> None:
+    from vggt.dependency import track_predict, vggsfm_utils
+    from vggt.dependency.vggsfm_tracker import TrackerPredictor
+
+    def generate_rank_without_dino(
+        images,
+        query_frame_num,
+        image_size=336,
+        model_name="dinov2_vitb14_reg",
+        device="cuda",
+        spatial_similarity=False,
+    ):
+        frame_count = int(images.shape[0])
+        if frame_count <= 1 or query_frame_num <= 0:
+            return []
+        count = min(query_frame_num, frame_count)
+        return np.linspace(0, frame_count - 1, num=count, dtype=int).tolist()
+
+    def build_vggsfm_tracker(model_path=None):
+        tracker = TrackerPredictor()
+        weights_path = Path(
+            model_path
+            or os.environ.get(
+                "VGGSFM_TRACKER_WEIGHTS_PATH",
+                str(Path(torch.hub.get_dir()) / "checkpoints" / "vggsfm_v2_tracker.pt"),
+            )
+        )
+        if weights_path.exists():
+            print(f"Loading VGGSfM tracker weights from {weights_path}")
+            state_dict = torch.load(weights_path, map_location="cpu")
+        else:
+            url = os.environ.get(
+                "VGGSFM_TRACKER_WEIGHTS_URL",
+                "https://hf-mirror.com/facebook/VGGSfM/resolve/main/vggsfm_v2_tracker.pt",
+            )
+            print(f"Downloading VGGSfM tracker weights to torch cache from {url}")
+            try:
+                state_dict = torch.hub.load_state_dict_from_url(
+                    url,
+                    model_dir=str(weights_path.parent),
+                    file_name=weights_path.name,
+                    map_location="cpu",
+                )
+            except (OSError, urllib.error.URLError) as exc:
+                raise RuntimeError(
+                    "Failed to download VGGSfM tracker weights. Run setup_a800_env.sh weights stage, "
+                    f"set VGGSFM_TRACKER_WEIGHTS_URL to an accessible mirror, or place weights at {weights_path}."
+                ) from exc
+        tracker.load_state_dict(state_dict)
+        tracker.eval()
+        return tracker
+
+    vggsfm_utils.build_vggsfm_tracker = build_vggsfm_tracker
+    track_predict.build_vggsfm_tracker = build_vggsfm_tracker
+    vggsfm_utils.generate_rank_by_dino = generate_rank_without_dino
+    track_predict.generate_rank_by_dino = generate_rank_without_dino
 
 
 def _select_ba_points(
