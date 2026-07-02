@@ -45,7 +45,7 @@ Full VGGT and Gaussian training require CUDA plus installed `vggt` and `gsplat`.
 
 ## Coding Style & Naming Conventions
 
-Use 4-space indentation, explicit imports, and type hints where they clarify data flow. Keep reusable logic in `src/vggt_gaussian_reconstruction/`; keep top-level scripts as thin CLI layers. Use `snake_case` for modules/functions, `PascalCase` for classes, and `test_*.py` with `test_*` functions. Prefer `pathlib.Path` and structured COLMAP helpers. Keep the Gaussian trainer aligned with `external/gsplat/examples/simple_trainer.py`: SH colors, per-parameter Adam optimizers, `DefaultStrategy`, SSIM/L1 loss, and scheduled SH degree.
+Use 4-space indentation, explicit imports, and type hints where they clarify data flow. Keep reusable logic in `src/vggt_gaussian_reconstruction/`; keep top-level scripts as thin CLI layers. Use `snake_case` for modules/functions, `PascalCase` for classes, and `test_*.py` with `test_*` functions. Prefer `pathlib.Path` and structured COLMAP helpers. Keep the Gaussian trainer aligned with the installed `gsplat` wheel API: SH colors, per-parameter Adam optimizers, `DefaultStrategy`, SSIM/L1 loss, scheduled SH degree, and bounded densification.
 
 ## Testing Guidelines
 

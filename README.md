@@ -27,10 +27,16 @@ Baidu A800 environment, `scripts/setup_a800_env.sh` installs PyTorch
 python prepare_data.py --video "大作业数据/数据3-场景.mp4" --out outputs/scene --num_frames 96
 python run_vggt.py --scene outputs/scene --device cuda
 python ba_optimize.py --scene outputs/scene --iters 1000 --lr_pose 1e-3 --lr_points 1e-2
-python train_gaussians.py --scene outputs/scene --mode vggt --steps 30000
-python train_gaussians.py --scene outputs/scene --mode ba --steps 30000
+python train_gaussians.py --scene outputs/scene --mode vggt --steps 30000 --max-gaussians 300000 --min-track-len 4
+python train_gaussians.py --scene outputs/scene --mode ba --steps 30000 --max-gaussians 300000 --min-track-len 4
 python evaluate.py --scene outputs/scene
-python viewer.py --scene outputs/scene --mode ba
+python viewer.py --scene outputs/scene --mode ba --port 8080
+```
+
+For Baidu AIHC online service startup, use:
+
+```bash
+VIEWER_PORT=8080 CHECKPOINT_PATH=/path/to/checkpoint.pt bash scripts/start_online_inference_service.sh
 ```
 
 ## Improvement experiment
@@ -67,8 +73,14 @@ outputs/scene/
   SE(3) deltas and 3D points from COLMAP observations using Huber reprojection
   loss.
 - `train_gaussians.py` uses this repository's local trainer on top of the
-  installed `gsplat` package. It reads `images/` plus the selected COLMAP sparse
-  model, optimizes Gaussians, and writes checkpoints/renders under
+  installed wheel `gsplat` package. It reads `images/` plus the selected COLMAP
+  sparse model, uses a `test_every` validation split, caps densification by
+  default, and writes checkpoints, validation renders, and stats under
   `gaussians_vggt/` or `gaussians_ba/`.
+- `viewer.py` starts a browser-based real-time renderer using `viser`,
+  `nerfview`, and `gsplat.rendering.rasterization`. It loads `--checkpoint` when
+  provided, otherwise it uses the newest `runs/*/gaussians_<mode>/checkpoint.pt`
+  under `--scene`. The web UI includes a checkpoint dropdown for switching
+  between discovered run checkpoints without restarting the service.
 - `docs/ppt_outline.md` maps the implementation and experiments to the required
   presentation sections.

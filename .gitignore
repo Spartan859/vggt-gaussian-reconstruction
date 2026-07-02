@@ -11,3 +11,5 @@ __pycache__/
 external/
 *.pyc
 req*.png
+*.zip
+projects/

@@ -17,6 +17,8 @@ class FrameScore:
     blur: float
     brightness: float
     score: float
+    novelty: float = 0.0
+    anchor_score: float = 0.0
 
 
 def extract_candidate_frames(video: Path, out_dir: Path, candidate_count: int, overwrite: bool = False) -> list[Path]:
@@ -53,8 +55,8 @@ def extract_candidate_frames(video: Path, out_dir: Path, candidate_count: int, o
 
 
 def select_frames(video: Path, image_dir: Path, num_frames: int, strategy: str, candidate_multiplier: int = 4) -> dict:
-    if strategy not in {"uniform", "quality"}:
-        raise ValueError("--strategy must be 'uniform' or 'quality'")
+    if strategy not in {"uniform", "quality", "anchor", "parallax"}:
+        raise ValueError("--strategy must be one of: uniform, quality, anchor, parallax")
     image_dir.mkdir(parents=True, exist_ok=True)
     candidate_count = max(num_frames, num_frames * candidate_multiplier)
     with tempfile.TemporaryDirectory(prefix="frames_") as tmp:
@@ -62,9 +64,15 @@ def select_frames(video: Path, image_dir: Path, num_frames: int, strategy: str, 
         if strategy == "uniform":
             selected = uniform_subset(candidates, num_frames)
             scores = [score_frame(p, i) for i, p in enumerate(candidates)]
-        else:
+        elif strategy == "quality":
             scores = [score_frame(p, i) for i, p in enumerate(candidates)]
             selected = quality_subset(scores, num_frames)
+        else:
+            scores = score_sequence(candidates)
+            if strategy == "anchor":
+                selected = anchor_subset(scores, num_frames)
+            else:
+                selected = parallax_subset(scores, num_frames)
 
         selected_paths = []
         for out_idx, src in enumerate(selected):
@@ -84,6 +92,8 @@ def select_frames(video: Path, image_dir: Path, num_frames: int, strategy: str, 
                 "blur": s.blur,
                 "brightness": s.brightness,
                 "score": s.score,
+                "novelty": s.novelty,
+                "anchor_score": s.anchor_score,
             }
             for s in scores
         ],
@@ -123,6 +133,69 @@ def quality_subset(scores: list[FrameScore], num_frames: int) -> list[Path]:
     return [s.path for s in sorted(selected, key=lambda x: x.index)]
 
 
+def anchor_subset(scores: list[FrameScore], num_frames: int) -> list[Path]:
+    """Choose a stable anchor first, then fill with quality-spaced frames."""
+    if len(scores) <= num_frames:
+        return [s.path for s in scores]
+    anchor = max(scores, key=lambda x: x.anchor_score)
+    selected: list[FrameScore] = [anchor]
+    remaining = [s for s in scores if s.index != anchor.index]
+    selected.extend(_diverse_quality_subset(remaining, num_frames - 1, prefer_novelty=False))
+    return [s.path for s in sorted(selected, key=lambda x: x.index)]
+
+
+def parallax_subset(scores: list[FrameScore], num_frames: int) -> list[Path]:
+    """Prefer sharp frames that add temporal/appearance novelty."""
+    if len(scores) <= num_frames:
+        return [s.path for s in scores]
+    selected = _diverse_quality_subset(scores, num_frames, prefer_novelty=True)
+    return [s.path for s in sorted(selected, key=lambda x: x.index)]
+
+
+def score_sequence(paths: list[Path]) -> list[FrameScore]:
+    scores = [score_frame(path, i) for i, path in enumerate(paths)]
+    thumbnails = [_gray_thumbnail(path) for path in paths]
+    if not thumbnails:
+        return scores
+    novelty = []
+    for i, gray in enumerate(thumbnails):
+        prev_diff = float(np.mean(np.abs(gray - thumbnails[i - 1]))) if i > 0 else 0.0
+        next_diff = float(np.mean(np.abs(gray - thumbnails[i + 1]))) if i + 1 < len(thumbnails) else 0.0
+        novelty.append(max(prev_diff, next_diff))
+    max_novelty = max(max(novelty), 1e-6)
+    center = (len(scores) - 1) / 2.0
+    for score, nov in zip(scores, novelty):
+        score.novelty = float(nov / max_novelty)
+        center_bias = 1.0 - abs(score.index - center) / max(center, 1.0)
+        score.anchor_score = float(score.score + 0.35 * center_bias + 0.25 * score.novelty)
+    return scores
+
+
+def _diverse_quality_subset(scores: list[FrameScore], num_frames: int, *, prefer_novelty: bool) -> list[FrameScore]:
+    if num_frames <= 0:
+        return []
+    min_gap = max(1, len(scores) // max(num_frames * 2, 1))
+    selected: list[FrameScore] = []
+
+    def rank(score: FrameScore) -> float:
+        novelty_weight = 0.7 if prefer_novelty else 0.25
+        return score.score + novelty_weight * score.novelty
+
+    for score in sorted(scores, key=rank, reverse=True):
+        if all(abs(score.index - old.index) >= min_gap for old in selected):
+            selected.append(score)
+        if len(selected) == num_frames:
+            break
+    if len(selected) < num_frames:
+        used = {s.index for s in selected}
+        for score in sorted(scores, key=lambda x: x.index):
+            if score.index not in used:
+                selected.append(score)
+            if len(selected) == num_frames:
+                break
+    return selected
+
+
 def score_frame(path: Path, index: int) -> FrameScore:
     with Image.open(path) as im:
         gray = np.asarray(im.convert("L"), dtype=np.float32) / 255.0
@@ -131,6 +204,12 @@ def score_frame(path: Path, index: int) -> FrameScore:
     exposure_penalty = abs(brightness - 0.5) * 0.5
     score = float(np.log1p(blur) - exposure_penalty)
     return FrameScore(path=path, index=index, blur=float(blur), brightness=brightness, score=score)
+
+
+def _gray_thumbnail(path: Path, size: tuple[int, int] = (64, 64)) -> np.ndarray:
+    with Image.open(path) as im:
+        gray = im.convert("L").resize(size)
+    return np.asarray(gray, dtype=np.float32) / 255.0
 
 
 def laplacian_variance(gray: np.ndarray) -> float:

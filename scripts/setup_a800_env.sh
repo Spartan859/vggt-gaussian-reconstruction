@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Build the A800 runtime environment for VGGT + gsplat main.
+# Build the A800 runtime environment for VGGT + the pinned gsplat wheel.
 # Run this on the GPU machine, from this repository root.
 
 REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
@@ -20,7 +20,6 @@ NUMPY_VERSION="${NUMPY_VERSION:-1.26.4}"
 TMPDIR="${TMPDIR:-${REPO_ROOT}/.tmp}"
 PIP_CACHE_DIR="${PIP_CACHE_DIR:-${REPO_ROOT}/.pip_cache}"
 TORCH_EXTENSIONS_DIR="${TORCH_EXTENSIONS_DIR:-${TMPDIR}/torch_extensions_${TORCH_VERSION}_${TORCH_CUDA}}"
-GSPLAT_INSTALL_MODE="${GSPLAT_INSTALL_MODE:-wheel}"
 GSPLAT_WHEEL_VERSION="${GSPLAT_WHEEL_VERSION:-1.5.3+pt23cu118}"
 GSPLAT_WHEEL_INDEX="${GSPLAT_WHEEL_INDEX:-https://docs.gsplat.studio/whl/pt23cu118/gsplat/}"
 VGGT_PACKAGE_SPEC="${VGGT_PACKAGE_SPEC:-git+https://gh-proxy.org/https://github.com/facebookresearch/vggt.git}"
@@ -59,14 +58,13 @@ Options:
   --skip-deps           Do not reinstall project/VGGT/example dependencies
   --skip-gsplat         Do not install/rebuild gsplat
   --skip-weights        Do not download VGGT weights
-  --skip-clean-gsplat   Do not remove old gsplat build artifacts before installing/rebuilding
+  --skip-clean-gsplat   Do not remove old gsplat torch extension cache before installing
   --skip-verify         Do not run import/CUDA verification
   -h, --help            Show this help
 
 Examples:
   bash scripts/setup_a800_env.sh
   bash scripts/setup_a800_env.sh --resume-from torch
-  RUN_CUDA=1 GSPLAT_INSTALL_MODE=source bash scripts/setup_a800_env.sh --resume-from gsplat
   RUN_VERIFY=0 bash scripts/setup_a800_env.sh --resume-from deps
 EOF
 }
@@ -358,7 +356,7 @@ log "repo: ${REPO_ROOT}"
 log "env: ${ENV_PREFIX}"
 log "cuda toolkit: ${CUDA_VERSION}"
 log "torch: ${TORCH_VERSION} torchvision: ${TORCHVISION_VERSION} index: ${TORCH_INDEX_URL}"
-log "gsplat install: ${GSPLAT_INSTALL_MODE} ${GSPLAT_WHEEL_VERSION}"
+log "gsplat wheel: ${GSPLAT_WHEEL_VERSION}"
 log "vggt weights: ${VGGT_WEIGHTS_PATH}"
 log "vggt weights url: ${VGGT_WEIGHTS_URL}"
 log "vggsfm tracker weights: ${VGGSFM_TRACKER_WEIGHTS_PATH}"
@@ -454,6 +452,8 @@ EOF
         "Pillow" huggingface_hub einops safetensors \
         -r "${FILTERED_REQ_DIR}/vggt_demo_deps.txt"
     TMPDIR="${TMPDIR}" PIP_CACHE_DIR="${PIP_CACHE_DIR}" "${PYTHON_BIN}" -m pip install \
+        "git+https://gh-proxy.org/https://github.com/nerfstudio-project/nerfview@4538024fe0d15fd1a0e4d760f3695fc44ca72787#egg=nerfview"
+    TMPDIR="${TMPDIR}" PIP_CACHE_DIR="${PIP_CACHE_DIR}" "${PYTHON_BIN}" -m pip install \
         "git+https://gh-proxy.org/https://github.com/jytime/LightGlue.git#egg=lightglue"
 
     repair_ffmpeg_openh264
@@ -464,39 +464,15 @@ fi
 
 if [[ "${RUN_GSPLAT}" == "1" ]]; then
     if [[ "${CLEAN_GSPLAT}" == "1" ]]; then
-        log "cleaning old gsplat build artifacts"
-        if [[ -d external/gsplat ]]; then
-            find external/gsplat \
-                \( -name 'csrc*.so' -o -name '*.egg-info' -o -name 'build' \) \
-                -print -exec rm -rf {} +
-        fi
+        log "cleaning old gsplat torch extension cache"
         rm -rf "${TORCH_EXTENSIONS_DIR}"
     fi
-    if [[ "${GSPLAT_INSTALL_MODE}" == "wheel" ]]; then
-        log "installing gsplat wheel ${GSPLAT_WHEEL_VERSION}"
-        "${PYTHON_BIN}" -m pip uninstall -y gsplat || true
-        TMPDIR="${TMPDIR}" PIP_CACHE_DIR="${PIP_CACHE_DIR}" "${PYTHON_BIN}" -m pip install --force-reinstall \
-            "gsplat==${GSPLAT_WHEEL_VERSION}" \
-            --find-links "${GSPLAT_WHEEL_INDEX}" \
-            --no-deps
-    elif [[ "${GSPLAT_INSTALL_MODE}" == "source" ]]; then
-        if [[ ! -d external/gsplat ]]; then
-            echo "GSPLAT_INSTALL_MODE=source requires external/gsplat." >&2
-            exit 1
-        fi
-        log "building gsplat main CUDA extensions from source"
-        TMPDIR="${TMPDIR}" \
-        PIP_CACHE_DIR="${PIP_CACHE_DIR}" \
-        CUDA_HOME="${CUDA_HOME}" \
-        TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST}" \
-        BUILD_EXPERIMENTAL="${BUILD_EXPERIMENTAL:-0}" \
-        MAX_JOBS="${MAX_JOBS:-8}" \
-        "${PYTHON_BIN}" -m pip install -e external/gsplat --no-build-isolation --force-reinstall
-    else
-        echo "Unknown GSPLAT_INSTALL_MODE: ${GSPLAT_INSTALL_MODE}" >&2
-        echo "Expected: wheel or source" >&2
-        exit 2
-    fi
+    log "installing gsplat wheel ${GSPLAT_WHEEL_VERSION}"
+    "${PYTHON_BIN}" -m pip uninstall -y gsplat || true
+    TMPDIR="${TMPDIR}" PIP_CACHE_DIR="${PIP_CACHE_DIR}" "${PYTHON_BIN}" -m pip install --force-reinstall \
+        "gsplat==${GSPLAT_WHEEL_VERSION}" \
+        --find-links "${GSPLAT_WHEEL_INDEX}" \
+        --no-deps
 else
     log "skipping gsplat build"
 fi

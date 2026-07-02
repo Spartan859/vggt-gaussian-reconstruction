@@ -25,6 +25,7 @@ def main() -> None:
     parser.add_argument("--camera-type", default="SIMPLE_PINHOLE")
     parser.add_argument("--shared-camera", action="store_true")
     parser.add_argument("--no-fine-tracking", action="store_true")
+    parser.add_argument("--query-frame-strategy", choices=["linspace", "quality", "anchor"], default="linspace")
     parser.add_argument("--extra-args", nargs=argparse.REMAINDER, default=[], help="Extra args forwarded to VGGT.")
     args = parser.parse_args()
 
@@ -61,6 +62,7 @@ def main() -> None:
             camera_type=args.camera_type,
             shared_camera=args.shared_camera,
             fine_tracking=not args.no_fine_tracking,
+            query_frame_strategy=args.query_frame_strategy,
             extra_args=args.extra_args,
         )
     )

@@ -32,12 +32,49 @@ GAUSSIAN_STEPS="${GAUSSIAN_STEPS:-30000}"
 GAUSSIAN_LR="${GAUSSIAN_LR:-1.0}"
 GAUSSIAN_IMAGE_SCALE="${GAUSSIAN_IMAGE_SCALE:-1.0}"
 GAUSSIAN_MAX_POINTS="${GAUSSIAN_MAX_POINTS:-200000}"
+GAUSSIAN_MAX_GAUSSIANS="${GAUSSIAN_MAX_GAUSSIANS:-200000}"
+GAUSSIAN_TEST_EVERY="${GAUSSIAN_TEST_EVERY:-8}"
+GAUSSIAN_REFINE_STOP_ITER="${GAUSSIAN_REFINE_STOP_ITER:-15000}"
+GAUSSIAN_GROW_GRAD2D="${GAUSSIAN_GROW_GRAD2D:-0.0002}"
+GAUSSIAN_PRUNE_OPA="${GAUSSIAN_PRUNE_OPA:-0.01}"
+GAUSSIAN_MIN_TRACK_LEN="${GAUSSIAN_MIN_TRACK_LEN:-4}"
+GAUSSIAN_OPACITY_REG="${GAUSSIAN_OPACITY_REG:-0.001}"
+GAUSSIAN_SCALE_REG="${GAUSSIAN_SCALE_REG:-0.001}"
+GAUSSIAN_PRUNE_EVERY="${GAUSSIAN_PRUNE_EVERY:-1000}"
+GAUSSIAN_PRUNE_LARGE_SCALE="${GAUSSIAN_PRUNE_LARGE_SCALE:-0.25}"
+GAUSSIAN_VISIBILITY_PRUNE_EVERY="${GAUSSIAN_VISIBILITY_PRUNE_EVERY:-2000}"
+GAUSSIAN_VISIBILITY_PRUNE_START="${GAUSSIAN_VISIBILITY_PRUNE_START:-8000}"
+GAUSSIAN_VISIBILITY_MIN_VIEWS="${GAUSSIAN_VISIBILITY_MIN_VIEWS:-2}"
+GAUSSIAN_PRUNE_SCENE_RADIUS="${GAUSSIAN_PRUNE_SCENE_RADIUS:-2.5}"
+GAUSSIAN_DEPTH_LOSS="${GAUSSIAN_DEPTH_LOSS:-1}"
+GAUSSIAN_DEPTH_LAMBDA="${GAUSSIAN_DEPTH_LAMBDA:-0.01}"
+GAUSSIAN_DEPTH_SAMPLE_COUNT="${GAUSSIAN_DEPTH_SAMPLE_COUNT:-2048}"
+GAUSSIAN_DEPTH_LOSS_CLAMP="${GAUSSIAN_DEPTH_LOSS_CLAMP:-2.0}"
+GAUSSIAN_MASK_LOSS="${GAUSSIAN_MASK_LOSS:-1}"
+GAUSSIAN_MASK_DIR="${GAUSSIAN_MASK_DIR:-${SCENE_DIR}/masks}"
+GAUSSIAN_MASK_ALPHA_LAMBDA="${GAUSSIAN_MASK_ALPHA_LAMBDA:-0.05}"
+GAUSSIAN_MASK_THRESHOLD="${GAUSSIAN_MASK_THRESHOLD:-0.5}"
+GAUSSIAN_OPACITIES_LR="${GAUSSIAN_OPACITIES_LR:-0.02}"
+GAUSSIAN_OPACITY_RESET_EVERY="${GAUSSIAN_OPACITY_RESET_EVERY:-1000}"
+GAUSSIAN_OPACITY_RESET_UNTIL="${GAUSSIAN_OPACITY_RESET_UNTIL:-0}"
+GAUSSIAN_FINAL_PRUNE_OPA="${GAUSSIAN_FINAL_PRUNE_OPA:-0.05}"
+GAUSSIAN_FINAL_PRUNE_LARGE_SCALE="${GAUSSIAN_FINAL_PRUNE_LARGE_SCALE:-0.08}"
+GAUSSIAN_FINAL_PRUNE_SCENE_RADIUS="${GAUSSIAN_FINAL_PRUNE_SCENE_RADIUS:-2.8}"
+GAUSSIAN_FINAL_VISIBILITY_MIN_VIEWS="${GAUSSIAN_FINAL_VISIBILITY_MIN_VIEWS:-3}"
+GAUSSIAN_DISTRIBUTED="${GAUSSIAN_DISTRIBUTED:-0}"
+if [[ -z "${GAUSSIAN_CVD:-}" ]]; then
+    if [[ "${GAUSSIAN_DISTRIBUTED}" == "1" ]]; then
+        GAUSSIAN_CVD="0,1,2,3,4,5,6,7"
+    else
+        GAUSSIAN_CVD="${CVD}"
+    fi
+fi
 GAUSSIAN_SAVE_EVERY="${GAUSSIAN_SAVE_EVERY:-1000}"
 GAUSSIAN_RENDER_EVERY="${GAUSSIAN_RENDER_EVERY:-1000}"
 
 RENDER_DIR_VGGT="${RENDER_DIR_VGGT:-}"
 RENDER_DIR_BA="${RENDER_DIR_BA:-}"
-VIEWER_COMMAND_TEMPLATE="${VIEWER_COMMAND_TEMPLATE:-}"
+VIEWER_PORT="${VIEWER_PORT:-8080}"
 
 TORCH_HOME="${TORCH_HOME:-${REPO_ROOT}/.cache/torch}"
 HF_HOME="${HF_HOME:-${REPO_ROOT}/.cache/huggingface}"
@@ -58,7 +95,9 @@ RUN_EVAL="${RUN_EVAL:-1}"
 RUN_VIEWER="${RUN_VIEWER:-0}"
 
 STDOUT_LOG_DIR="${STDOUT_LOG_DIR:-${REPO_ROOT}/outputs/platform_logs}"
-EXP_NAME="${EXP_NAME:-vggt_gaussian_full_$(date +%Y%m%d_%H%M%S)}"
+if [[ -z "${EXP_NAME:-}" ]]; then
+    EXP_NAME="vggt_gaussian_full_$(date +%Y%m%d_%H%M%S)"
+fi
 RUN_OUTPUT_DIR="${RUN_OUTPUT_DIR:-${SCENE_DIR}/runs/${EXP_NAME}}"
 GAUSSIAN_OUTPUT_DIR="${GAUSSIAN_OUTPUT_DIR:-${RUN_OUTPUT_DIR}/gaussians_${GAUSSIAN_MODE}}"
 EVAL_REPORT_PATH="${EVAL_REPORT_PATH:-${RUN_OUTPUT_DIR}/eval_report.json}"
@@ -83,6 +122,7 @@ Output:
   Each run writes Gaussian outputs and eval_report.json under:
     ${SCENE_DIR}/runs/${EXP_NAME}/
   Override RUN_OUTPUT_DIR, GAUSSIAN_OUTPUT_DIR, or EVAL_REPORT_PATH if needed.
+  Set VIEWER_PORT to choose the browser viewer port when --run-viewer is used.
 
 Examples:
   bash scripts/train_infer_baidu.sh --resume-from gsplat
@@ -235,6 +275,13 @@ run_step() {
     CUDA_VISIBLE_DEVICES="${CVD}" "$@"
 }
 
+run_step_with_cvd() {
+    local cvd="$1"
+    shift
+    log "command: CUDA_VISIBLE_DEVICES=${cvd} $*"
+    CUDA_VISIBLE_DEVICES="${cvd}" "$@"
+}
+
 mkdir -p "${TORCH_HOME}/hub/checkpoints" "${HF_HOME}"
 
 log "repo: ${REPO_ROOT}"
@@ -250,11 +297,16 @@ log "vggsfm tracker weights url: ${VGGSFM_TRACKER_WEIGHTS_URL}"
 log "aliked weights: ${ALIKED_WEIGHTS_PATH}"
 log "superpoint weights: ${SUPERPOINT_WEIGHTS_PATH}"
 log "CVD: ${CVD}"
+log "gaussian CVD: ${GAUSSIAN_CVD}"
+log "gaussian distributed: ${GAUSSIAN_DISTRIBUTED}"
+log "gaussian mask loss: ${GAUSSIAN_MASK_LOSS}"
+log "gaussian mask dir: ${GAUSSIAN_MASK_DIR}"
 log "device: ${DEVICE}"
 log "stdout log: ${STDOUT_LOG}"
 log "run output dir: ${RUN_OUTPUT_DIR}"
 log "gaussian output dir: ${GAUSSIAN_OUTPUT_DIR}"
 log "eval report path: ${EVAL_REPORT_PATH}"
+log "viewer port: ${VIEWER_PORT}"
 log "stages: prepare=${RUN_PREPARE} vggt=${RUN_VGGT} ba=${RUN_BA} gsplat=${RUN_GSPLAT} eval=${RUN_EVAL} viewer=${RUN_VIEWER}"
 
 require_path "${PYTHON_BIN}"
@@ -355,11 +407,53 @@ if [[ "${RUN_GSPLAT}" == "1" ]]; then
         --lr "${GAUSSIAN_LR}"
         --image-scale "${GAUSSIAN_IMAGE_SCALE}"
         --max-points "${GAUSSIAN_MAX_POINTS}"
+        --max-gaussians "${GAUSSIAN_MAX_GAUSSIANS}"
+        --opacities-lr "${GAUSSIAN_OPACITIES_LR}"
+        --test-every "${GAUSSIAN_TEST_EVERY}"
+        --refine-stop-iter "${GAUSSIAN_REFINE_STOP_ITER}"
+        --grow-grad2d "${GAUSSIAN_GROW_GRAD2D}"
+        --prune-opa "${GAUSSIAN_PRUNE_OPA}"
+        --min-track-len "${GAUSSIAN_MIN_TRACK_LEN}"
+        --opacity-reg "${GAUSSIAN_OPACITY_REG}"
+        --scale-reg "${GAUSSIAN_SCALE_REG}"
+        --prune-every "${GAUSSIAN_PRUNE_EVERY}"
+        --prune-large-scale "${GAUSSIAN_PRUNE_LARGE_SCALE}"
+        --visibility-prune-every "${GAUSSIAN_VISIBILITY_PRUNE_EVERY}"
+        --visibility-prune-start "${GAUSSIAN_VISIBILITY_PRUNE_START}"
+        --visibility-min-views "${GAUSSIAN_VISIBILITY_MIN_VIEWS}"
+        --prune-scene-radius "${GAUSSIAN_PRUNE_SCENE_RADIUS}"
+        --depth-lambda "${GAUSSIAN_DEPTH_LAMBDA}"
+        --depth-sample-count "${GAUSSIAN_DEPTH_SAMPLE_COUNT}"
+        --depth-loss-clamp "${GAUSSIAN_DEPTH_LOSS_CLAMP}"
+        --mask-alpha-lambda "${GAUSSIAN_MASK_ALPHA_LAMBDA}"
+        --mask-threshold "${GAUSSIAN_MASK_THRESHOLD}"
+        --opacity-reset-every "${GAUSSIAN_OPACITY_RESET_EVERY}"
+        --opacity-reset-until "${GAUSSIAN_OPACITY_RESET_UNTIL}"
+        --final-prune-opa "${GAUSSIAN_FINAL_PRUNE_OPA}"
+        --final-prune-large-scale "${GAUSSIAN_FINAL_PRUNE_LARGE_SCALE}"
+        --final-prune-scene-radius "${GAUSSIAN_FINAL_PRUNE_SCENE_RADIUS}"
+        --final-visibility-min-views "${GAUSSIAN_FINAL_VISIBILITY_MIN_VIEWS}"
         --save-every "${GAUSSIAN_SAVE_EVERY}"
         --render-every "${GAUSSIAN_RENDER_EVERY}"
         --output-dir "${GAUSSIAN_OUTPUT_DIR}"
     )
-    run_step "${GSPLAT_CMD[@]}"
+    if [[ "${GAUSSIAN_DEPTH_LOSS}" == "1" ]]; then
+        GSPLAT_CMD+=(--depth-loss)
+    else
+        GSPLAT_CMD+=(--no-depth-loss)
+    fi
+    if [[ "${GAUSSIAN_MASK_LOSS}" == "1" ]]; then
+        GSPLAT_CMD+=(--mask-loss)
+        if [[ -d "${GAUSSIAN_MASK_DIR}" ]]; then
+            GSPLAT_CMD+=(--mask-dir "${GAUSSIAN_MASK_DIR}")
+        fi
+    else
+        GSPLAT_CMD+=(--no-mask-loss)
+    fi
+    if [[ "${GAUSSIAN_DISTRIBUTED}" == "1" ]]; then
+        GSPLAT_CMD+=(--distributed)
+    fi
+    run_step_with_cvd "${GAUSSIAN_CVD}" "${GSPLAT_CMD[@]}"
 else
     log "skipping Gaussian training"
 fi
@@ -387,14 +481,15 @@ fi
 
 if [[ "${RUN_VIEWER}" == "1" ]]; then
     log "starting viewer command"
-    if [[ -z "${VIEWER_COMMAND_TEMPLATE}" ]]; then
-        echo "Set VIEWER_COMMAND_TEMPLATE before RUN_VIEWER=1." >&2
-        exit 1
-    fi
-    run_step "${PYTHON_BIN}" viewer.py \
+    VIEWER_CMD=("${PYTHON_BIN}" viewer.py \
         --scene "${SCENE_DIR}" \
         --mode "${GAUSSIAN_MODE}" \
-        --command-template "${VIEWER_COMMAND_TEMPLATE}"
+        --device "${DEVICE}" \
+        --port "${VIEWER_PORT}")
+    if [[ -f "${GAUSSIAN_OUTPUT_DIR}/checkpoint.pt" ]]; then
+        VIEWER_CMD+=(--checkpoint "${GAUSSIAN_OUTPUT_DIR}/checkpoint.pt")
+    fi
+    run_step "${VIEWER_CMD[@]}"
 fi
 
 log "pipeline finished"

@@ -9,6 +9,7 @@ from vggt_gaussian_reconstruction.vggt_runner import (
     _configure_torch_hub,
     _configure_vggsfm_tracker_loader,
     _prepare_tracker_inputs,
+    _rank_query_frames,
     _rename_and_rescale,
     _select_ba_points,
     _write_pycolmap_reconstruction,
@@ -151,6 +152,24 @@ def test_configure_vggsfm_tracker_loader_replaces_dino_ranking() -> None:
     ranks = track_predict.generate_rank_by_dino(np.zeros((5, 3, 4, 4)), query_frame_num=3, device="cpu")
 
     assert ranks == [0, 2, 4]
+
+
+def test_rank_query_frames_returns_sorted_unique_indices(tmp_path: Path) -> None:
+    paths = []
+    for i in range(6):
+        arr = np.zeros((16, 16, 3), dtype=np.uint8)
+        arr[:, i % 3 :: 3] = 255
+        path = tmp_path / f"{i}.png"
+        from PIL import Image
+
+        Image.fromarray(arr).save(path)
+        paths.append(path)
+
+    ranks = _rank_query_frames(paths, 3, "quality")
+
+    assert len(ranks) == 3
+    assert ranks == sorted(ranks)
+    assert len(set(ranks)) == 3
 
 
 def test_prepare_tracker_inputs_keeps_track_filters_on_cpu() -> None:

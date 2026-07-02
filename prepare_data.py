@@ -15,7 +15,7 @@ def main() -> None:
     parser.add_argument("--video", required=True, type=Path, help="Input scene video.")
     parser.add_argument("--out", required=True, type=Path, help="Output scene directory.")
     parser.add_argument("--num_frames", type=int, default=96)
-    parser.add_argument("--strategy", choices=["uniform", "quality"], default="quality")
+    parser.add_argument("--strategy", choices=["uniform", "quality", "anchor", "parallax"], default="quality")
     parser.add_argument("--candidate_multiplier", type=int, default=4)
     args = parser.parse_args()
 
